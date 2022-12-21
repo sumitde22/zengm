@@ -1,5 +1,6 @@
 import type { Result } from "regression";
 import type { TradePickValues } from "src/common/types";
+import { g, helpers, local } from "../../util";
 
 let cache: {
 	cacheKey: number;
@@ -8,7 +9,9 @@ let cache: {
 };
 
 const refreshCache = () => {
-	if (cache === undefined) {
+	const season = g.get("season");
+	if (cache === undefined || cache.cacheKey != season) {
+		cache.cacheKey = season;
 	}
 };
 
