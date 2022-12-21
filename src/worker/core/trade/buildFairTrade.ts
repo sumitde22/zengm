@@ -1,6 +1,8 @@
 import type { Result } from "regression";
+import { groupBy } from "../../../common/groupBy";
 import type { TradePickValues } from "src/common/types";
 import { g, helpers, local } from "../../util";
+import { idb } from "../../db";
 
 let cache: {
 	cacheKey: number;
@@ -8,10 +10,13 @@ let cache: {
 	estValues: TradePickValues;
 };
 
-const refreshCache = () => {
+const refreshCache = async () => {
 	const season = g.get("season");
 	if (cache === undefined || cache.cacheKey != season) {
-		cache.cacheKey = season;
+		const playersByTid = groupBy(
+			await idb.cache.players.indexGetAll("playersByTid", [0, Infinity]),
+			"tid",
+		);
 	}
 };
 
