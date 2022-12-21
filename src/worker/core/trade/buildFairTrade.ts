@@ -3,6 +3,7 @@ import { groupBy } from "../../../common/groupBy";
 import type { TradePickValues } from "src/common/types";
 import { g, helpers, local } from "../../util";
 import { idb } from "../../db";
+import team from "../team";
 
 let cache: {
 	cacheKey: number;
@@ -17,6 +18,32 @@ const refreshCache = async () => {
 			await idb.cache.players.indexGetAll("playersByTid", [0, Infinity]),
 			"tid",
 		);
+
+		const teamOvrs: {
+			tid: number;
+			ovr: number;
+		}[] = [];
+		for (const [tidString, players] of Object.entries(playersByTid)) {
+			const tid = parseInt(tidString);
+			const ovr = team.ovr(
+				players.map(p => ({
+					pid: p.pid,
+					value: p.value,
+					ratings: {
+						ovr: p.ratings.at(-1)!.ovr,
+						ovrs: p.ratings.at(-1)!.ovrs,
+						pos: p.ratings.at(-1)!.pos,
+					},
+				})),
+				{
+					fast: true,
+				},
+			);
+
+			teamOvrs.push({ tid, ovr });
+		}
+
+		teamOvrs.sort((a, b) => b.ovr - a.ovr);
 	}
 };
 
