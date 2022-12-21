@@ -8,6 +8,8 @@ import summary from "./summary";
 import type { TradeTeams } from "../../../common/types";
 import { isSport } from "../../../common";
 
+let timeSpendingTrades: number | undefined;
+
 const getAITids = async () => {
 	const teams = await idb.cache.teams.getAll();
 	return teams
@@ -136,6 +138,8 @@ const betweenAiTeams = async () => {
 		return false;
 	}
 
+	const startTime = performance.now();
+
 	// If aiTradesFactor is not an integer, use the fractional part as a probability. Like for 3.5, 50% of the times it will be 3, and 50% will be 4.
 	// Also scale so there are fewer trade attempts if there are fewer teams.
 	let float = g.get("aiTradesFactor");
@@ -161,6 +165,14 @@ const betweenAiTeams = async () => {
 			}
 		}
 	}
+	const endTime = performance.now();
+	const secondsElapsed = (endTime - startTime) / 1000;
+	timeSpendingTrades = !timeSpendingTrades
+		? secondsElapsed
+		: timeSpendingTrades + secondsElapsed;
+	console.log(
+		`Total time spent finding AI-to-AI trades: ${timeSpendingTrades}`,
+	);
 };
 
 export default betweenAiTeams;

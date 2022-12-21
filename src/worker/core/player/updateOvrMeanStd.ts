@@ -1,6 +1,9 @@
 import { local } from "../../util";
 import { idb } from "../../db";
 
+// Note: this is currently only being at the beginning of the season
+// Should this also be called after the playoffs/before the draft to account for
+// player ovrs reduced by injuries?
 const updateOvrMeanStd = async () => {
 	if (local.playerOvrMeanStdStale) {
 		const players = await idb.cache.players.indexGetAll("playersByTid", [

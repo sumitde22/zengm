@@ -36,6 +36,7 @@ let cache: {
 	estValues: TradePickValues;
 	gp: number;
 };
+let countOvrCalculations: number | undefined;
 
 const zscore = (value: number) =>
 	(value - local.playerOvrMean) / local.playerOvrStd;
@@ -461,6 +462,8 @@ const refreshCache = async () => {
 
 		teamOvrs.push({ tid, ovr });
 	}
+	countOvrCalculations = !countOvrCalculations ? 30 : countOvrCalculations + 30;
+	console.log(`Number of team ovrs calculated: ${countOvrCalculations}`);
 	teamOvrs.sort((a, b) => b.ovr - a.ovr);
 
 	const teams = (await idb.cache.teams.getAll()).filter(t => !t.disabled);

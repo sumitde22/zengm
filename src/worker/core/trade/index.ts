@@ -1,4 +1,5 @@
 import betweenAiTeams from "./betweenAiTeams";
+import buildFairTrade from "./buildFairTrade";
 import clear from "./clear";
 import create from "./create";
 import get from "./get";
@@ -14,6 +15,7 @@ import updatePlayers from "./updatePlayers";
 
 export default {
 	betweenAiTeams,
+	buildFairTrade,
 	clear,
 	create,
 	get,
