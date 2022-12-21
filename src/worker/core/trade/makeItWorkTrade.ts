@@ -3,6 +3,7 @@ import { g, helpers } from "../../util";
 import makeItWork from "./makeItWork";
 import summary from "./summary";
 import get from "./get";
+import buildTrade from "./buildTrade";
 
 /**
  * Make a trade work
@@ -16,6 +17,7 @@ const makeItWorkTrade = async () => {
 	const tr = await get();
 	const teams0 = tr.teams;
 	const teams = await makeItWork(helpers.deepCopy(teams0), false);
+	await buildTrade(helpers.deepCopy(teams0), false);
 
 	if (!teams) {
 		return {
