@@ -14,6 +14,8 @@ import { getNumPicksPerRound } from "../trade/getPickValues";
 type Asset =
 	| {
 			type: "player";
+			// TODO: REMOVE NAME, only for console debugging
+			name: string;
 			value: number;
 			contractValue: number;
 			injury: PlayerInjury;
@@ -22,6 +24,7 @@ type Asset =
 	  }
 	| {
 			type: "pick";
+			name: "pick";
 			value: number;
 			contractValue: number;
 			injury: PlayerInjury;
@@ -38,7 +41,8 @@ let cache: {
 };
 let countOvrCalculations: number | undefined;
 
-const zscore = (value: number) =>
+//TODO: move to helpers
+export const zscore = (value: number) =>
 	(value - local.playerOvrMean) / local.playerOvrStd;
 
 const MIN_VALUE = bySport({
@@ -53,7 +57,9 @@ const MAX_VALUE = bySport({
 	football: 3,
 	hockey: 2,
 });
-const getContractValue = (
+
+//TODO: move to helpers
+export const getContractValue = (
 	contract: PlayerContract,
 	normalizedValue: number,
 ) => {
@@ -122,6 +128,7 @@ const getPlayers = async ({
 		if (!pidsRemove.includes(p.pid)) {
 			roster.push({
 				type: "player",
+				name: p.lastName,
 				value,
 				contractValue: getContractValue(p.contract, value),
 				injury: p.injury,
@@ -137,6 +144,7 @@ const getPlayers = async ({
 
 			remove.push({
 				type: "player",
+				name: p.lastName,
 				value: fudgedValue,
 				contractValue: getContractValue(p.contract, value),
 				injury: p.injury,
@@ -154,6 +162,7 @@ const getPlayers = async ({
 
 			add.push({
 				type: "player",
+				name: p.lastName,
 				value,
 				contractValue: getContractValue(p.contract, value),
 				injury: p.injury,
@@ -276,6 +285,7 @@ const getPickInfo = (
 
 	return {
 		type: "pick",
+		name: "pick",
 		value,
 		contractValue,
 		injury: {
@@ -341,7 +351,9 @@ const getPicks = async ({
 	}
 };
 
-const EXPONENT = bySport({
+// 7 seems really high as a exponent? was curious if/how this was tested/decided,
+// based on looking through the logs of player values, it was creating some extreme values for non-superstars
+export const EXPONENT = bySport({
 	baseball: 3,
 	basketball: 7,
 	football: 3,
@@ -430,7 +442,11 @@ const sumValues = (
 			playerValue = Math.max(0, playerValue);
 		}
 
-		return memo + (playerValue > 1 ? playerValue ** EXPONENT : playerValue);
+		playerValue = playerValue > 1 ? playerValue ** EXPONENT : playerValue;
+
+		console.log(`OLD value ${p.name}: ${playerValue}`);
+
+		return memo + playerValue;
 	}, 0);
 };
 
