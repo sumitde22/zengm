@@ -28,16 +28,23 @@ let cache: {
 	rookieSalaries: number[];
 };
 
+type Asset = {
+	id: number;
+	proposingTeamValue: number;
+	receivingTeamValue: number;
+};
+
 type TradeEvaluationInfo = {
 	team: Team;
-	allPlayers: { [pid: number]: Player };
-	allPicks: { [dpid: number]: DraftPick };
+	// TODO: see if using sets/dictionaries speeds things up
+	allPlayers: Player<MinimalPlayerRatings>[];
+	allPicks: DraftPick[];
+	playersInTrade: Asset[];
+	playersNotInTrade: Asset[];
 	// index 0 represents teams[0]'s evaluation, index[1] represent teams[1]'s evaluation of asset
-	playersInTrade: { [pid: number]: [number, number] };
-	playersNotInTrade: { [pid: number]: [number, number] };
 	playerValueGivingUp: [number, number];
-	draftPicksInTrade: { [dpid: number]: [number, number] };
-	draftPicksNotInTrade: { [dpid: number]: [number, number] };
+	draftPicksInTrade: Asset[];
+	draftPicksNotInTrade: Asset[];
 	draftPickValueGivingUp: [number, number];
 };
 
@@ -72,25 +79,57 @@ const initializeTradeEvaluationCache = async (teams: TradeTeams) => {
 			team: t!,
 			allPlayers: t1Players,
 			allPicks: t1Picks,
-			playersInTrade: {},
-			playersNotInTrade: {},
+			playersInTrade: [],
+			playersNotInTrade: [],
 			playerValueGivingUp: [0, 0],
-			draftPicksInTrade: {},
-			draftPicksNotInTrade: {},
+			draftPicksInTrade: [],
+			draftPicksNotInTrade: [],
 			draftPickValueGivingUp: [0, 0],
 		},
 		{
 			team: t2!,
 			allPlayers: t2Players,
 			allPicks: t2Picks,
-			playersInTrade: {},
-			playersNotInTrade: {},
+			playersInTrade: [],
+			playersNotInTrade: [],
 			playerValueGivingUp: [0, 0],
-			draftPicksInTrade: {},
-			draftPicksNotInTrade: {},
+			draftPicksInTrade: [],
+			draftPicksNotInTrade: [],
 			draftPickValueGivingUp: [0, 0],
 		},
 	];
+	for (const i of [0, 1]) {
+		// apparently foreach doesn't work well with promises so using for loop instead
+		for (const pid of teams[i].pids) {
+			const value = getPlayerTradeValue(
+				tradeEvaluationCache[i].allPlayers[pid],
+				tradeEvaluationCache[1].team.strategy,
+				teams[1].tid,
+				teams[0].tid,
+			);
+			tradeEvaluationCache[i].playersInTrade.push({
+				id: pid,
+				proposingTeamValue: 0,
+				receivingTeamValue: value,
+			});
+			tradeEvaluationCache[i].playerValueGivingUp[1] =
+				tradeEvaluationCache[i].playerValueGivingUp[1] + value;
+		}
+		for (const dpid of teams[i].dpids) {
+			const value = await getPickTradeValue(
+				tradeEvaluationCache[i].allPicks[dpid],
+				tradeEvaluationCache[0].team.strategy,
+				teams[0].tid,
+			);
+			tradeEvaluationCache[i].draftPicksInTrade.push({
+				id: dpid,
+				proposingTeamValue: 0,
+				receivingTeamValue: value,
+			});
+			tradeEvaluationCache[i].draftPickValueGivingUp[1] =
+				tradeEvaluationCache[i].draftPickValueGivingUp[1] + value;
+		}
+	}
 };
 
 const refreshCache = async () => {
@@ -159,33 +198,8 @@ const buildTrade = async (
 	// 3. Keep adding most valuable assets from "proposing team", ensure trade still favorable to "receiving" team
 	//      -- Also take into account negative receiving team assets, holdUserConstant, maxAssetsToAdd
 
-	for (const i of [0, 1]) {
-		// apparently foreach doesn't work well with promises so using for loop instead
-		for (const pid of teams[i].pids) {
-			const value = getPlayerTradeValue(
-				tradeEvaluationCache[i].allPlayers[pid],
-				tradeEvaluationCache[1].team.strategy,
-				teams[1].tid,
-				teams[0].tid,
-			);
-			tradeEvaluationCache[i].playersInTrade[pid] = [0, value];
-			tradeEvaluationCache[i].playerValueGivingUp[1] =
-				tradeEvaluationCache[i].playerValueGivingUp[1] + value;
-		}
-		for (const dpid of teams[i].dpids) {
-			const value = getPickTradeValue(
-				tradeEvaluationCache[i].allPicks[dpid],
-				tradeEvaluationCache[0].team.strategy,
-				teams[0].tid,
-			);
-		}
-	}
-
-	console.log(JSON.stringify(tradeEvaluationCache));
-
-	const tradedDraftPicks = [{}, {}];
-	const totalValueDraftPicks = [{}, {}];
 	// invariant: user team/proposing team will always be teams[0]
+	console.log(JSON.stringify(tradeEvaluationCache));
 	return;
 };
 
@@ -306,7 +320,7 @@ const getPlayerTradeValue = (
 	return value;
 };
 
-const getPickTradeValue = (
+const getPickTradeValue = async (
 	dp: DraftPick,
 	strategy: string,
 	tradingPartnerTid: number,
@@ -320,6 +334,7 @@ const getPickTradeValue = (
 	if (dp.pick > 0) {
 		estPick = dp.pick;
 	} else {
+		estPick = await getEstimatedPick(dp.originalTid);
 		// tid rather than originalTid, because it's about what the user can control
 		const usersPick = dp.tid === g.get("userTid");
 
@@ -419,6 +434,64 @@ const getPickTradeValue = (
 	value = value > 1 ? value ** EXPONENT : value;
 
 	return value;
+};
+
+const getEstimatedPick = async (tid: number) => {
+	// TODO: dynamically get traded players from trade, also make copies somewhere here
+	let players: Player<MinimalPlayerRatings>[];
+	if (tid === tradeEvaluationCache[0].team.tid) {
+		players = tradeEvaluationCache[0].allPlayers;
+	} else if (tid === tradeEvaluationCache[1].team.tid) {
+		players = tradeEvaluationCache[1].allPlayers;
+	} else {
+		players = await idb.cache.players.indexGetAll("playersByTid", tid);
+	}
+
+	const playerRatings = players.map(p => ({
+		pid: p.pid,
+		value: p.value,
+		ratings: {
+			ovr: p.ratings.at(-1)!.ovr,
+			ovrs: p.ratings.at(-1)!.ovrs,
+			pos: p.ratings.at(-1)!.pos,
+		},
+	}));
+
+	const teamOvr = team.ovr(playerRatings, { fast: true });
+
+	const teamOvrRank = cache.ovrToRankModel.predict(teamOvr)[1];
+
+	const teamOvrWinp =
+		0.25 +
+		(0.5 * (g.get("numActiveTeams") - 1 - teamOvrRank)) /
+			(g.get("numActiveTeams") - 1);
+
+	const teamSeason = await idb.cache.teamSeasons.indexGet(
+		"teamSeasonsByTidSeason",
+		[tid, g.get("season")],
+	);
+
+	let record: [number, number];
+
+	if (teamSeason === undefined) {
+		// Expansion team?
+		record = [0, 0];
+	} else {
+		record = [teamSeason.won, teamSeason.lost];
+	}
+
+	const gp = record[0] + record[1];
+	let projectedWinP: number;
+
+	if (gp === 0) {
+		projectedWinP = teamOvrWinp;
+	} else {
+		const seasonFraction = gp / g.get("numGames");
+		projectedWinP =
+			seasonFraction * (record[0] / gp) + (1 - seasonFraction) * teamOvrWinp;
+	}
+
+	return winPToPick(projectedWinP);
 };
 
 // Source: https://stackoverflow.com/questions/55725139/fit-sigmoid-function-s-shape-curve-to-data-using-python
