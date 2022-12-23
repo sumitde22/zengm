@@ -8,7 +8,7 @@ import type {
 	TradePickValues,
 	TradeTeams,
 } from "src/common/types";
-import { g, helpers, local } from "../../util";
+import { g, helpers } from "../../util";
 import { idb } from "../../db";
 import draft from "../draft";
 import team from "../team";
@@ -99,10 +99,50 @@ const initializeTradeEvaluationCache = async (teams: TradeTeams) => {
 		},
 	];
 	for (const i of [0, 1]) {
+		for (const p of tradeEvaluationCache[i].allPlayers) {
+			if (!teams[i].pidsExcluded.includes(p.pid)) {
+				if (teams[i].pids.includes(p.pid)) {
+					const proposingTeamValue = getPlayerTradeValue(
+						p,
+						tradeEvaluationCache[0].team.strategy,
+						teams[0].tid,
+						teams[1].tid,
+					);
+					const receivingTeamValue = getPlayerTradeValue(
+						p,
+						tradeEvaluationCache[1].team.strategy,
+						teams[1].tid,
+						teams[0].tid,
+					);
+					tradeEvaluationCache[i].playersInTrade.push({
+						id: p.pid,
+						proposingTeamValue,
+						receivingTeamValue,
+					});
+				} else {
+					tradeEvaluationCache[i].playersNotInTrade.push({
+						id: p.pid,
+						proposingTeamValue: getPlayerTradeValue(
+							p,
+							tradeEvaluationCache[0].team.strategy,
+							teams[0].tid,
+							teams[1].tid,
+						),
+						receivingTeamValue: getPlayerTradeValue(
+							p,
+							tradeEvaluationCache[1].team.strategy,
+							teams[1].tid,
+							teams[0].tid,
+						),
+					});
+				}
+			}
+		}
+
 		// apparently foreach doesn't work well with promises so using for loop instead
 		for (const pid of teams[i].pids) {
 			const value = getPlayerTradeValue(
-				tradeEvaluationCache[i].allPlayers[pid],
+				tradeEvaluationCache[i].allPlayers.find(p => p.pid === pid)!,
 				tradeEvaluationCache[1].team.strategy,
 				teams[1].tid,
 				teams[0].tid,
@@ -117,7 +157,7 @@ const initializeTradeEvaluationCache = async (teams: TradeTeams) => {
 		}
 		for (const dpid of teams[i].dpids) {
 			const value = await getPickTradeValue(
-				tradeEvaluationCache[i].allPicks[dpid],
+				tradeEvaluationCache[i].allPicks.find(dp => dp.dpid === dpid)!,
 				tradeEvaluationCache[0].team.strategy,
 				teams[0].tid,
 			);
@@ -199,28 +239,53 @@ const buildTrade = async (
 	//      -- Also take into account negative receiving team assets, holdUserConstant, maxAssetsToAdd
 
 	// invariant: user team/proposing team will always be teams[0]
-	console.log(JSON.stringify(tradeEvaluationCache));
-	return;
+	let trade: TradeTeams | undefined = teams;
+	if (
+		tradeEvaluationCache[0].draftPickValueGivingUp[1] +
+			tradeEvaluationCache[0].playerValueGivingUp[1] <
+		tradeEvaluationCache[1].draftPickValueGivingUp[1] +
+			tradeEvaluationCache[1].playerValueGivingUp[1]
+	) {
+		const tradeInfo = await improveForReceiver(
+			teams,
+			holdUserConstant,
+			maxAssetsToAdd,
+		);
+		if (tradeInfo === undefined) {
+			return;
+		}
+		trade = tradeInfo.trade;
+		maxAssetsToAdd =
+			maxAssetsToAdd === Infinity
+				? Infinity
+				: maxAssetsToAdd - tradeInfo.assetsAdded;
+	}
+	if (!holdUserConstant) {
+		trade = await improveForProposer(trade, maxAssetsToAdd);
+	}
+	return trade;
 };
 
-// add assets from trade proposer until assets given by proposer value > assets given by receiver
-// using forward selection, always add asset that will push the trade value the smallest amount above 0
+// add assets from trade proposer (or negative assets from receiver)
+// until assets given by proposer value > assets given by receiver
+// using forward selection, always add asset that will push the difference in trade value the smallest amount above 0
 // and biggest asset otherwise if said asset doesn't exist
-const addProposerAssets = async (
+const improveForReceiver = async (
 	teams: TradeTeams,
 	holdUserConstant: boolean,
 	maxAssetsToAdd = Infinity,
-): Promise<TradeTeams | undefined> => {
+): Promise<{ trade: TradeTeams; assetsAdded: number } | undefined> => {
 	return;
 };
 
 // add assets from trade receiver to miminize positive value of (proposer giving assets value - receiver giving assets value)
 // using forward selection, add biggest asset that does not cause receiver assets value > proposer assets value
-const addReceiverAssets = async (
+const improveForProposer = async (
 	teams: TradeTeams,
-	holdUserConstant: boolean,
 	maxAssetsToAdd = Infinity,
-) => {};
+): Promise<TradeTeams> => {
+	return teams;
+};
 
 const getPlayerTradeValue = (
 	player: Player<MinimalPlayerRatings>,
@@ -324,6 +389,7 @@ const getPickTradeValue = async (
 	dp: DraftPick,
 	strategy: string,
 	tradingPartnerTid: number,
+	teamOvr?: number,
 ) => {
 	const numPicksPerRound = getNumPicksPerRound();
 	const season =
@@ -334,7 +400,9 @@ const getPickTradeValue = async (
 	if (dp.pick > 0) {
 		estPick = dp.pick;
 	} else {
-		estPick = await getEstimatedPick(dp.originalTid);
+		teamOvr = teamOvr != undefined ? teamOvr : await getTeamOvr(dp.originalTid);
+		estPick = await getEstimatedPick(dp.originalTid, teamOvr);
+		console.log(`NEW Est pick #: ${estPick}`);
 		// tid rather than originalTid, because it's about what the user can control
 		const usersPick = dp.tid === g.get("userTid");
 
@@ -433,32 +501,12 @@ const getPickTradeValue = async (
 
 	value = value > 1 ? value ** EXPONENT : value;
 
+	console.log(`New value of pick: ${value}`);
+
 	return value;
 };
 
-const getEstimatedPick = async (tid: number) => {
-	// TODO: dynamically get traded players from trade, also make copies somewhere here
-	let players: Player<MinimalPlayerRatings>[];
-	if (tid === tradeEvaluationCache[0].team.tid) {
-		players = tradeEvaluationCache[0].allPlayers;
-	} else if (tid === tradeEvaluationCache[1].team.tid) {
-		players = tradeEvaluationCache[1].allPlayers;
-	} else {
-		players = await idb.cache.players.indexGetAll("playersByTid", tid);
-	}
-
-	const playerRatings = players.map(p => ({
-		pid: p.pid,
-		value: p.value,
-		ratings: {
-			ovr: p.ratings.at(-1)!.ovr,
-			ovrs: p.ratings.at(-1)!.ovrs,
-			pos: p.ratings.at(-1)!.pos,
-		},
-	}));
-
-	const teamOvr = team.ovr(playerRatings, { fast: true });
-
+const getEstimatedPick = async (tid: number, teamOvr: number) => {
 	const teamOvrRank = cache.ovrToRankModel.predict(teamOvr)[1];
 
 	const teamOvrWinp =
@@ -494,6 +542,32 @@ const getEstimatedPick = async (tid: number) => {
 	return winPToPick(projectedWinP);
 };
 
+const getTeamOvr = async (tid: number) => {
+	// TODO: dynamically get traded players from trade, also make copies somewhere here
+	let players: Player<MinimalPlayerRatings>[];
+	if (tid === tradeEvaluationCache[0].team.tid) {
+		players = tradeEvaluationCache[0].allPlayers;
+	} else if (tid === tradeEvaluationCache[1].team.tid) {
+		players = tradeEvaluationCache[1].allPlayers;
+	} else {
+		players = await idb.cache.players.indexGetAll("playersByTid", tid);
+	}
+
+	const playerRatings = players.map(p => ({
+		pid: p.pid,
+		value: p.value,
+		ratings: {
+			ovr: p.ratings.at(-1)!.ovr,
+			ovrs: p.ratings.at(-1)!.ovrs,
+			pos: p.ratings.at(-1)!.pos,
+		},
+	}));
+
+	const teamOvr = team.ovr(playerRatings, { fast: true });
+
+	return teamOvr;
+};
+
 // Source: https://stackoverflow.com/questions/55725139/fit-sigmoid-function-s-shape-curve-to-data-using-python
 // This curve models specifically a mapping from win % to estimated draft pick based on simulation of 30 BBGM seasons
 // Different curves could be generated for other sports as well, and the parameters below could be decided based on sport
@@ -508,7 +582,7 @@ const winPToPick = (winP: number) => {
 	const numDraftPicksPerRound = getNumPicksPerRound();
 	const projectedPick =
 		numDraftPicksPerRound * (L / (1 + Math.exp(-k * (winP - x0))) + b);
-	return helpers.bound(projectedPick, 1, numDraftPicksPerRound);
+	return helpers.bound(Math.round(projectedPick), 1, numDraftPicksPerRound);
 };
 
 export default buildTrade;

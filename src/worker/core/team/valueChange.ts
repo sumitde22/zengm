@@ -187,6 +187,8 @@ const getPickNumber = (
 		const temp = cache.estPicks[dp.originalTid];
 		estPick = temp !== undefined ? temp : numPicksPerRound / 2;
 
+		console.log(`OLD Est pick #: ${estPick}`);
+
 		// tid rather than originalTid, because it's about what the user can control
 		const usersPick = dp.tid === g.get("userTid");
 
