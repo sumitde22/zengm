@@ -20,14 +20,58 @@ async function findMostValuablePicks() {
 	// If no expiring contracts, try with empty offers or minimal compensation
 	const playersToOffer = expiringPlayers.length > 0 ? expiringPlayers : [];
 
-	console.log(`Checking ${teams.length} teams for picks to dump...`);
-	let teamsWithPicks = 0;
-	let teamsWithNegativePlayers = 0;
-	let teamsWithViableTrades = 0;
+	console.log(`Checking ${teams.length} teams for trades...`);
 
-	const availablePicks = [];
+	// Helper function to find optimal combination of players
+	async function findOptimalCombination(
+		players,
+		teamTid,
+		pickDpids,
+		userTid,
+		playersToOffer,
+	) {
+		let bestCombination = [];
+		let bestDv = Infinity;
 
-	for (const team of teams) {
+		// Generate all possible combinations (2^n combinations)
+		const n = players.length;
+		for (let i = 1; i < 1 << n; i++) {
+			const combination = [];
+			for (let j = 0; j < n; j++) {
+				if (i & (1 << j)) {
+					combination.push(players[j]);
+				}
+			}
+
+			if (combination.length === 0) continue;
+
+			try {
+				const testDv = await bbgm.team.valueChange(
+					teamTid,
+					[],
+					combination.map((p) => p.pid),
+					[],
+					pickDpids,
+					undefined,
+					userTid,
+					playersToOffer.map((p) => p.pid),
+				);
+
+				// If viable and closer to 0 than current best, use this combination
+				if (testDv > 0 && testDv < bestDv) {
+					bestCombination = combination;
+					bestDv = testDv;
+				}
+			} catch (e) {
+				// Ignore errors
+			}
+		}
+
+		return { combination: bestCombination, dv: bestDv };
+	}
+
+	// Helper function to find all possible trades for a team
+	async function findAllTradesForTeam(team) {
 		const picks = await bbgm.idb.cache.draftPicks.indexGetAll(
 			"draftPicksByTid",
 			team.tid,
@@ -36,9 +80,8 @@ async function findMostValuablePicks() {
 			(p) => (p.round === 1 || p.round === 2) && p.season === season,
 		);
 		if (picksToTry.length === 0) {
-			continue;
+			return { typeATrades: [], remainingTrades: [] };
 		}
-		teamsWithPicks++;
 
 		const allPlayers = await bbgm.idb.cache.players.indexGetAll(
 			"playersByTid",
@@ -57,128 +100,310 @@ async function findMostValuablePicks() {
 		}
 
 		if (negativePlayers.length === 0) {
-			continue;
+			return { typeATrades: [], remainingTrades: [] };
 		}
-		teamsWithNegativePlayers++;
 
-		// Find the most valuable pick that the team is willing to give up
-		// Test picks from most valuable to least valuable
-		let mostValuableWillingPick = null;
-		let mostValuableWillingValue = -Infinity;
+		const typeATrades = [];
+		const remainingTrades = [];
 
-		console.log(`Checking picks for ${team.abbrev}:`);
+		// Generate all possible pick combinations (single picks and multi-pick combinations)
+		const pickCombinations = [];
 
-		// First, get all picks and their values
+		// Single picks
+		for (const pick of picksToTry) {
+			pickCombinations.push([pick]);
+		}
+
+		// Multi-pick combinations (if team has multiple picks)
+		if (picksToTry.length > 1) {
+			// Try all 2-pick combinations
+			for (let i = 0; i < picksToTry.length; i++) {
+				for (let j = i + 1; j < picksToTry.length; j++) {
+					pickCombinations.push([picksToTry[i], picksToTry[j]]);
+				}
+			}
+		}
+
+		// Get all pick combinations and their values
 		const pickValues = [];
-		for (const pickOption of picksToTry) {
+		for (const pickCombo of pickCombinations) {
 			try {
+				const pickDpids = pickCombo.map((p) => p.dpid);
 				const dv = await bbgm.team.valueChange(
 					team.tid,
 					[],
 					[],
 					[],
-					[pickOption.dpid],
+					pickDpids,
 					undefined,
 					userTid,
 					[],
 				);
 				const pickValue = -dv;
-				pickValues.push({ pick: pickOption, value: pickValue, dv: dv });
-				console.log(
-					`  ${pickOption.round === 1 ? "1st" : "2nd"} round: dv=${dv.toFixed(2)}, pickValue=${pickValue.toFixed(2)}`,
-				);
+				pickValues.push({
+					picks: pickCombo,
+					value: pickValue,
+					dv: dv,
+					description: pickCombo
+						.map((p) => `${p.round === 1 ? "1st" : "2nd"}(${p.season})`)
+						.join("+"),
+				});
 			} catch (e) {
-				console.log(
-					`  ${pickOption.round === 1 ? "1st" : "2nd"} round: Error - ${e.message}`,
-				);
+				// Ignore errors
 			}
 		}
 
-		// Sort by pick value (most valuable first)
-		pickValues.sort((a, b) => b.value - a.value);
+		// Sort by pick value (least valuable first for efficiency)
+		pickValues.sort((a, b) => a.value - b.value);
 
-		// Test each pick from most valuable to least valuable
+		// Find Type A trades (all players expiring 2025)
+		const expiring2025Players = negativePlayers.filter(
+			(p) => p.contract.exp === 2025,
+		);
+		if (expiring2025Players.length > 0) {
+			for (const pickInfo of pickValues) {
+				try {
+					const pickDpids = pickInfo.picks.map((p) => p.dpid);
+					const dvWithAll2025 = await bbgm.team.valueChange(
+						team.tid,
+						[],
+						expiring2025Players.map((p) => p.pid),
+						[],
+						pickDpids,
+						undefined,
+						userTid,
+						playersToOffer.map((p) => p.pid),
+					);
+
+					if (dvWithAll2025 > 0) {
+						const result = await findOptimalCombination(
+							expiring2025Players,
+							team.tid,
+							pickDpids,
+							userTid,
+							playersToOffer,
+						);
+
+						if (result.combination.length > 0) {
+							typeATrades.push({
+								team: team,
+								picks: pickInfo.picks,
+								negativePlayers: result.combination,
+								expiringPlayers: playersToOffer,
+								pickValue: pickInfo.value,
+								tradeValue: result.dv,
+								pickDescription: pickInfo.description,
+							});
+						}
+					} else {
+						// This pick combination is too valuable for Type A trade, break early
+						break;
+					}
+				} catch (e) {
+					// Ignore errors
+				}
+			}
+		}
+
+		// Find remaining trades (all negative players)
 		for (const pickInfo of pickValues) {
 			try {
-				const dv = await bbgm.team.valueChange(
+				const pickDpids = pickInfo.picks.map((p) => p.dpid);
+				const dvWithAllPlayers = await bbgm.team.valueChange(
 					team.tid,
 					[],
 					negativePlayers.map((p) => p.pid),
 					[],
-					[pickInfo.pick.dpid],
+					pickDpids,
 					undefined,
 					userTid,
 					playersToOffer.map((p) => p.pid),
 				);
-				console.log(
-					`  Testing trade with ${pickInfo.pick.round === 1 ? "1st" : "2nd"} round (value=${pickInfo.value.toFixed(2)}): dv=${dv.toFixed(2)}`,
-				);
-				if (dv > 0) {
-					mostValuableWillingPick = pickInfo.pick;
-					mostValuableWillingValue = pickInfo.value;
-					console.log(`    -> Team willing to give up this pick!`);
-					break; // Found the most valuable pick they're willing to give up
+
+				if (dvWithAllPlayers > 0) {
+					const result = await findOptimalCombination(
+						negativePlayers,
+						team.tid,
+						pickDpids,
+						userTid,
+						playersToOffer,
+					);
+
+					if (result.combination.length > 0) {
+						remainingTrades.push({
+							team: team,
+							picks: pickInfo.picks,
+							negativePlayers: result.combination,
+							expiringPlayers: playersToOffer,
+							pickValue: pickInfo.value,
+							tradeValue: result.dv,
+							pickDescription: pickInfo.description,
+						});
+					}
+				} else {
+					// This pick combination is too valuable for any trade, break early
+					break;
 				}
 			} catch (e) {
-				console.log(
-					`  Trade evaluation error for ${pickInfo.pick.round === 1 ? "1st" : "2nd"} round: ${e.message}`,
-				);
+				// Ignore errors
 			}
 		}
 
-		if (!mostValuableWillingPick) {
-			console.log(`  No picks that ${team.abbrev} is willing to give up`);
-			continue;
-		}
+		return { typeATrades, remainingTrades };
+	}
+
+	// Step 1: Find and execute Type A trades iteratively (re-evaluating after each trade)
+	console.log("Step 1: Finding and executing Type A trades...");
+
+	let executedCount = 0;
+	let maxIterations = 10; // Safety guard to prevent infinite loops
+	let iteration = 0;
+
+	while (playersToOffer.length > 0 && iteration < maxIterations) {
+		iteration++;
 		console.log(
-			`  Most valuable pick ${team.abbrev} is willing to give up: ${mostValuableWillingPick.round === 1 ? "1st" : "2nd"} round, value=${mostValuableWillingValue.toFixed(2)}`,
+			`🔄 Iteration ${iteration}: ${playersToOffer.length} players available`,
 		);
 
-		// Add to available picks
-		teamsWithViableTrades++;
-		availablePicks.push({
-			team: team,
-			pick: mostValuableWillingPick,
-			negativePlayers: negativePlayers,
-			valueChange: 0, // We'll recalculate this
-			pickValue: mostValuableWillingValue,
-		});
-		console.log(`  -> ${team.abbrev} added to viable trades`);
-		console.log("");
+		// Find all possible Type A trades with current playersToOffer
+		const allTypeATrades = [];
+		for (const team of teams) {
+			const trades = await findAllTradesForTeam(team);
+			allTypeATrades.push(...trades.typeATrades);
+		}
+
+		if (allTypeATrades.length === 0) {
+			console.log("No more Type A trades possible with remaining players");
+			break;
+		}
+
+		// Sort by pick value (most valuable first)
+		allTypeATrades.sort((a, b) => b.pickValue - a.pickValue);
+
+		// Try to execute the most valuable trade
+		const bestTrade = allTypeATrades[0];
+		const success = await executeTrade(bestTrade);
+
+		if (success) {
+			executedCount++;
+			// Remove the traded players from playersToOffer
+			const tradedPlayerPids = new Set(
+				bestTrade.expiringPlayers.map((p) => p.pid),
+			);
+			playersToOffer = playersToOffer.filter(
+				(p) => !tradedPlayerPids.has(p.pid),
+			);
+			console.log(
+				`✅ Trade ${executedCount} successful! ${playersToOffer.length} players remaining`,
+			);
+		} else {
+			// If the best trade failed, remove it and try the next one
+			allTypeATrades.shift();
+			if (allTypeATrades.length === 0) {
+				console.log("No more viable Type A trades");
+				break;
+			}
+		}
 	}
-
-	console.log(`Teams with 1st/2nd round picks: ${teamsWithPicks}`);
-	console.log(`Teams with negative players: ${teamsWithNegativePlayers}`);
-	console.log(`Teams with viable trades: ${teamsWithViableTrades}`);
-
-	if (availablePicks.length === 0) {
-		console.log("No teams willing to dump picks found.");
-		return;
-	}
-
-	// Sort by pick value (most valuable first)
-	availablePicks.sort((a, b) => b.pickValue - a.pickValue);
 
 	console.log(
-		`Found ${availablePicks.length} teams willing to dump their most valuable pick:`,
+		`✅ Auto-execution complete: ${executedCount} Type A trades successful`,
 	);
 	console.log("");
 
-	availablePicks.forEach((item, index) => {
+	// Step 2: Find remaining trades from all teams
+	console.log("Step 2: Finding remaining trades...");
+	const remainingTrades = [];
+
+	for (const team of teams) {
+		const trades = await findAllTradesForTeam(team);
+
+		// Take the best trade for this team (highest pick value)
+		const allRemainingTrades = [...trades.remainingTrades];
+		if (allRemainingTrades.length > 0) {
+			const bestTrade = allRemainingTrades.reduce((best, current) =>
+				current.pickValue > best.pickValue ? current : best,
+			);
+
+			remainingTrades.push(bestTrade);
+		}
+	}
+
+	// Sort remaining trades by pick value (most valuable first)
+	remainingTrades.sort((a, b) => b.pickValue - a.pickValue);
+
+	// List remaining trades for manual execution
+	if (remainingTrades.length > 0) {
 		console.log(
-			`${index + 1}. ${item.team.abbrev} - ${item.pick.round === 1 ? "1st" : "2nd"} round (${item.pick.season})`,
+			`📋 ${remainingTrades.length} remaining trades available for manual execution:`,
 		);
-		console.log(`   Pick value: ${item.pickValue.toFixed(2)}`);
-		console.log(`   Negative players: ${item.negativePlayers.length}`);
-		console.log(`   Total trade value: ${item.valueChange.toFixed(2)}`);
+
+		remainingTrades.forEach((trade, index) => {
+			const expiring2025 = trade.negativePlayers.filter(
+				(p) => p.contract.exp === 2025,
+			);
+			const expiring2026Plus = trade.negativePlayers.filter(
+				(p) => p.contract.exp > 2025,
+			);
+
+			console.log(
+				`${index + 1}. ${trade.team.abbrev} - ${trade.pickDescription}`,
+			);
+			console.log(
+				`   Pick value: ${trade.pickValue.toFixed(2)} | 2025 expiring: ${expiring2025.length} | 2026+: ${expiring2026Plus.length}`,
+			);
+		});
 		console.log("");
-	});
+	}
+
+	if (executedCount === 0 && remainingTrades.length === 0) {
+		console.log("No viable trades found.");
+	}
 }
 
-await findMostValuablePicks();
+async function executeTrade(trade) {
+	try {
+		// Create the trade using the correct API format
+		await bbgm.trade.create([
+			{
+				tid: bbgm.g.get("userTid"),
+				pids: trade.expiringPlayers.map((p) => p.pid),
+				pidsExcluded: [],
+				dpids: [],
+				dpidsExcluded: [],
+			},
+			{
+				tid: trade.team.tid,
+				pids: trade.negativePlayers.map((p) => p.pid),
+				pidsExcluded: [],
+				dpids: trade.picks.map((p) => p.dpid),
+				dpidsExcluded: [],
+			},
+		]);
 
-// Find teams willing to give up their lowest 1st or 2nd round pick plus all negative value players for nothing
-// Run in the worker console at any phase
+		// Propose and accept the trade
+		const [success, message] = await bbgm.trade.propose(false);
+
+		if (success) {
+			console.log(`✅ Trade executed with ${trade.team.abbrev}!`);
+			console.log(
+				`   Received: ${trade.picks.map((p) => `${p.round === 1 ? "1st" : "2nd"}(${p.season})`).join("+")} + ${trade.negativePlayers.length} players`,
+			);
+			console.log(
+				`   Sent: ${trade.expiringPlayers.length} expiring contracts`,
+			);
+			return true;
+		} else {
+			console.log(`❌ Trade with ${trade.team.abbrev} failed: ${message}`);
+			return false;
+		}
+	} catch (e) {
+		console.log(
+			`❌ Error executing trade with ${trade.team.abbrev}: ${e.message}`,
+		);
+		return false;
+	}
+}
 
 async function isNegativeTradablePlayer(p, teamTid, userTid) {
 	if (bbgm.trade.isUntradable(p).untradable) {
@@ -204,3 +429,5 @@ async function isNegativeTradablePlayer(p, teamTid, userTid) {
 		return false;
 	}
 }
+
+await findMostValuablePicks();
