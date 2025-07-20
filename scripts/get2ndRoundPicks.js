@@ -160,6 +160,9 @@ async function findMostValuablePicks() {
 		const expiring2025Players = negativePlayers.filter(
 			(p) => p.contract.exp === 2025,
 		);
+		console.log(
+			`   🔍 ${team.abbrev}: Found ${expiring2025Players.length} players expiring 2025 out of ${negativePlayers.length} negative players`,
+		);
 		if (expiring2025Players.length > 0) {
 			for (const pickInfo of pickValues) {
 				try {
@@ -205,7 +208,7 @@ async function findMostValuablePicks() {
 			}
 		}
 
-		// Find remaining trades (all negative players)
+		// Find remaining trades (trades that are NOT Type A - i.e., not all 2025 expiring players)
 		for (const pickInfo of pickValues) {
 			try {
 				const pickDpids = pickInfo.picks.map((p) => p.dpid);
@@ -230,15 +233,26 @@ async function findMostValuablePicks() {
 					);
 
 					if (result.combination.length > 0) {
-						remainingTrades.push({
-							team: team,
-							picks: pickInfo.picks,
-							negativePlayers: result.combination,
-							expiringPlayers: playersToOffer,
-							pickValue: pickInfo.value,
-							tradeValue: result.dv,
-							pickDescription: pickInfo.description,
-						});
+						// Check if this is a Type A trade (all players expiring 2025)
+						const allExpiring2025 = result.combination.every(
+							(p) => p.contract.exp === 2025,
+						);
+
+						// Only add to remaining trades if it's NOT a Type A trade
+						if (!allExpiring2025) {
+							console.log(
+								`   🔍 ${team.abbrev}: Adding to remaining trades (not all 2025 expiring)`,
+							);
+							remainingTrades.push({
+								team: team,
+								picks: pickInfo.picks,
+								negativePlayers: result.combination,
+								expiringPlayers: playersToOffer,
+								pickValue: pickInfo.value,
+								tradeValue: result.dv,
+								pickDescription: pickInfo.description,
+							});
+						}
 					}
 				} else {
 					// This pick combination is too valuable for any trade, break early
@@ -323,7 +337,6 @@ async function findMostValuablePicks() {
 	console.log("=".repeat(50));
 
 	const remainingTrades = [];
-	let remainingExecutedCount = 0;
 
 	for (const team of teams) {
 		const trades = await findAllTradesForTeam(team);
@@ -342,13 +355,15 @@ async function findMostValuablePicks() {
 	// Sort remaining trades by pick value (most valuable first)
 	remainingTrades.sort((a, b) => b.pickValue - a.pickValue);
 
-	// Auto-execute remaining trades if they're clearly beneficial
+	// Display remaining trades for manual review (don't auto-execute)
 	if (remainingTrades.length > 0) {
 		console.log(
-			`📊 Found ${remainingTrades.length} remaining trades to evaluate...`,
+			`📊 Found ${remainingTrades.length} remaining trades for manual review:`,
 		);
+		console.log("");
 
-		for (const trade of remainingTrades) {
+		for (let i = 0; i < remainingTrades.length; i++) {
+			const trade = remainingTrades[i];
 			const expiring2025 = trade.negativePlayers.filter(
 				(p) => p.contract.exp === 2025,
 			);
@@ -357,36 +372,33 @@ async function findMostValuablePicks() {
 			);
 
 			console.log(
-				`🎯 Attempting remaining trade with ${trade.team.abbrev}: ${trade.pickDescription} (value: ${trade.pickValue.toFixed(2)})`,
+				`${i + 1}. ${trade.team.abbrev}: ${trade.pickDescription} (value: ${trade.pickValue.toFixed(2)})`,
 			);
 			console.log(
 				`   📊 2025 expiring: ${expiring2025.length} | 2026+: ${expiring2026Plus.length}`,
 			);
-
-			const success = await executeTrade(trade);
-
-			if (success) {
-				remainingExecutedCount++;
-				console.log(`✅ Remaining Trade ${remainingExecutedCount} successful!`);
-			} else {
-				console.log(`❌ Remaining trade with ${trade.team.abbrev} failed`);
-			}
+			console.log(
+				`   📤 Would send: ${trade.expiringPlayers.length} expiring contracts`,
+			);
+			console.log(
+				`   📥 Would receive: ${trade.picks.map((p) => `${p.round === 1 ? "1st" : "2nd"}(${p.season})`).join("+")} + ${trade.negativePlayers.length} players`,
+			);
+			console.log("");
 		}
+	} else {
+		console.log("📊 No remaining trades found for manual review.");
 	}
 
 	console.log(
-		`✅ Remaining trades complete: ${remainingExecutedCount} trades successful`,
+		`✅ Remaining trades review complete: ${remainingTrades.length} trades found`,
 	);
 	console.log("");
 
 	// Final summary
-	const totalExecuted = executedCount + remainingExecutedCount;
-	if (totalExecuted === 0) {
-		console.log("❌ No viable trades found.");
+	if (executedCount === 0) {
+		console.log("❌ No Type A trades found or executed.");
 	} else {
-		console.log(
-			`🎉 Total trades executed: ${totalExecuted} (${executedCount} Type A + ${remainingExecutedCount} remaining)`,
-		);
+		console.log(`🎉 Type A trades executed: ${executedCount}`);
 	}
 }
 
