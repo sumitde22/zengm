@@ -254,6 +254,7 @@ async function findMostValuablePicks() {
 
 	// Step 1: Find and execute Type A trades iteratively (re-evaluating after each trade)
 	console.log("Step 1: Finding and executing Type A trades...");
+	console.log("=".repeat(50));
 
 	let executedCount = 0;
 	let maxIterations = 10; // Safety guard to prevent infinite loops
@@ -273,15 +274,21 @@ async function findMostValuablePicks() {
 		}
 
 		if (allTypeATrades.length === 0) {
-			console.log("No more Type A trades possible with remaining players");
+			console.log("❌ No more Type A trades possible with remaining players");
 			break;
 		}
+
+		console.log(`📊 Found ${allTypeATrades.length} Type A trades to test...`);
 
 		// Sort by pick value (most valuable first)
 		allTypeATrades.sort((a, b) => b.pickValue - a.pickValue);
 
 		// Try to execute the most valuable trade
 		const bestTrade = allTypeATrades[0];
+		console.log(
+			`🎯 Attempting Type A trade with ${bestTrade.team.abbrev}: ${bestTrade.pickDescription} (value: ${bestTrade.pickValue.toFixed(2)})`,
+		);
+
 		const success = await executeTrade(bestTrade);
 
 		if (success) {
@@ -294,26 +301,29 @@ async function findMostValuablePicks() {
 				(p) => !tradedPlayerPids.has(p.pid),
 			);
 			console.log(
-				`✅ Trade ${executedCount} successful! ${playersToOffer.length} players remaining`,
+				`✅ Type A Trade ${executedCount} successful! ${playersToOffer.length} players remaining`,
 			);
 		} else {
 			// If the best trade failed, remove it and try the next one
 			allTypeATrades.shift();
 			if (allTypeATrades.length === 0) {
-				console.log("No more viable Type A trades");
+				console.log("❌ No more viable Type A trades");
 				break;
 			}
 		}
 	}
 
 	console.log(
-		`✅ Auto-execution complete: ${executedCount} Type A trades successful`,
+		`✅ Type A Auto-execution complete: ${executedCount} Type A trades successful`,
 	);
 	console.log("");
 
 	// Step 2: Find remaining trades from all teams
 	console.log("Step 2: Finding remaining trades...");
+	console.log("=".repeat(50));
+
 	const remainingTrades = [];
+	let remainingExecutedCount = 0;
 
 	for (const team of teams) {
 		const trades = await findAllTradesForTeam(team);
@@ -332,13 +342,13 @@ async function findMostValuablePicks() {
 	// Sort remaining trades by pick value (most valuable first)
 	remainingTrades.sort((a, b) => b.pickValue - a.pickValue);
 
-	// List remaining trades for manual execution
+	// Auto-execute remaining trades if they're clearly beneficial
 	if (remainingTrades.length > 0) {
 		console.log(
-			`📋 ${remainingTrades.length} remaining trades available for manual execution:`,
+			`📊 Found ${remainingTrades.length} remaining trades to evaluate...`,
 		);
 
-		remainingTrades.forEach((trade, index) => {
+		for (const trade of remainingTrades) {
 			const expiring2025 = trade.negativePlayers.filter(
 				(p) => p.contract.exp === 2025,
 			);
@@ -347,17 +357,36 @@ async function findMostValuablePicks() {
 			);
 
 			console.log(
-				`${index + 1}. ${trade.team.abbrev} - ${trade.pickDescription}`,
+				`🎯 Attempting remaining trade with ${trade.team.abbrev}: ${trade.pickDescription} (value: ${trade.pickValue.toFixed(2)})`,
 			);
 			console.log(
-				`   Pick value: ${trade.pickValue.toFixed(2)} | 2025 expiring: ${expiring2025.length} | 2026+: ${expiring2026Plus.length}`,
+				`   📊 2025 expiring: ${expiring2025.length} | 2026+: ${expiring2026Plus.length}`,
 			);
-		});
-		console.log("");
+
+			const success = await executeTrade(trade);
+
+			if (success) {
+				remainingExecutedCount++;
+				console.log(`✅ Remaining Trade ${remainingExecutedCount} successful!`);
+			} else {
+				console.log(`❌ Remaining trade with ${trade.team.abbrev} failed`);
+			}
+		}
 	}
 
-	if (executedCount === 0 && remainingTrades.length === 0) {
-		console.log("No viable trades found.");
+	console.log(
+		`✅ Remaining trades complete: ${remainingExecutedCount} trades successful`,
+	);
+	console.log("");
+
+	// Final summary
+	const totalExecuted = executedCount + remainingExecutedCount;
+	if (totalExecuted === 0) {
+		console.log("❌ No viable trades found.");
+	} else {
+		console.log(
+			`🎉 Total trades executed: ${totalExecuted} (${executedCount} Type A + ${remainingExecutedCount} remaining)`,
+		);
 	}
 }
 
@@ -385,21 +414,21 @@ async function executeTrade(trade) {
 		const [success, message] = await bbgm.trade.propose(false);
 
 		if (success) {
-			console.log(`✅ Trade executed with ${trade.team.abbrev}!`);
+			console.log(`   ✅ Trade executed with ${trade.team.abbrev}!`);
 			console.log(
-				`   Received: ${trade.picks.map((p) => `${p.round === 1 ? "1st" : "2nd"}(${p.season})`).join("+")} + ${trade.negativePlayers.length} players`,
+				`      📥 Received: ${trade.picks.map((p) => `${p.round === 1 ? "1st" : "2nd"}(${p.season})`).join("+")} + ${trade.negativePlayers.length} players`,
 			);
 			console.log(
-				`   Sent: ${trade.expiringPlayers.length} expiring contracts`,
+				`      📤 Sent: ${trade.expiringPlayers.length} expiring contracts`,
 			);
 			return true;
 		} else {
-			console.log(`❌ Trade with ${trade.team.abbrev} failed: ${message}`);
+			console.log(`   ❌ Trade with ${trade.team.abbrev} failed: ${message}`);
 			return false;
 		}
 	} catch (e) {
 		console.log(
-			`❌ Error executing trade with ${trade.team.abbrev}: ${e.message}`,
+			`   ❌ Error executing trade with ${trade.team.abbrev}: ${e.message}`,
 		);
 		return false;
 	}
