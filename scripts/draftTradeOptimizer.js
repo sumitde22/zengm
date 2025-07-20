@@ -156,14 +156,6 @@ async function evaluateTrade(teams) {
 			[],
 		);
 
-		// Debug: show both perspectives occasionally (reduced frequency)
-		if (Math.random() < 0.001) {
-			// 0.1% chance to show debug
-			console.log(
-				`      🔍 DEBUG: CPU DV: ${cpuDv.toFixed(2)}, Our DV: ${ourDv.toFixed(2)}`,
-			);
-		}
-
 		return cpuDv; // Return CPU team's value change (they need to accept)
 	} catch (error) {
 		console.log("Error evaluating trade:", error);
@@ -213,10 +205,6 @@ async function executeTrade(teams, description) {
 
 // Try to acquire picks by taking on negative value players from other teams
 async function acquireFreePicks() {
-	console.log(
-		"=== Step 1: Acquiring picks by taking on negative value players ===",
-	);
-
 	const userTid = bbgm.g.get("userTid");
 	const otherTeams = await getOtherTeams();
 	let totalPicksAcquired = 0;
@@ -309,9 +297,6 @@ async function acquireFreePicks() {
 		}
 	}
 
-	console.log(
-		`Total picks acquired by taking on negative value: ${totalPicksAcquired}`,
-	);
 	return totalPicksAcquired;
 }
 
@@ -494,18 +479,8 @@ async function findOptimalTradeUpPath(
 	let totalTradeEvaluations = 0;
 	let totalTradeEvaluationTime = 0;
 
-	console.log(
-		`   🔍 Starting Dijkstra with ${picksList.length} potential picks to evaluate...`,
-	);
-
 	while (queue.length > 0 && dijkstraIterations < maxDijkstraIterations) {
 		dijkstraIterations++;
-
-		if (dijkstraIterations % 50 === 0) {
-			console.log(
-				`   🔄 Dijkstra iteration ${dijkstraIterations}/${maxDijkstraIterations} (${queue.length} nodes in queue, ${totalTradeEvaluations} trades evaluated, ${totalTradeEvaluationTime}ms)`,
-			);
-		}
 
 		// Get node with lowest cost (simple min find instead of full sort)
 		let minIndex = 0;
@@ -724,12 +699,6 @@ async function findOptimalTradeUpPath(
 				allValidCombinations.push(bestTrade);
 			}
 
-			if (tradeEvaluationsForThisPick > 0) {
-				console.log(
-					`      📊 Evaluated ${tradeEvaluationsForThisPick} trades for this pick (${tradeEvaluationTimeForThisPick}ms, avg ${(tradeEvaluationTimeForThisPick / tradeEvaluationsForThisPick).toFixed(1)}ms per trade)`,
-				);
-			}
-
 			// Sort combinations by score (best first)
 			allValidCombinations.sort((a, b) => b.score - a.score);
 
@@ -862,49 +831,26 @@ async function optimizeDraftTrades() {
 	const draftYear = currentSeason;
 
 	// Step 1: Trade up from existing picks (optimal path-dependent)
-	console.log(
-		"\n=== Step 1: Trading up from existing picks (optimal path-dependent) ===",
-	);
 	let tradesExecuted = 0;
 	const pickQueue = userPicksInitial.slice(); // Only current season picks
 	const processedDpids = new Set();
 
 	// Find and execute optimal trade paths for each pick
-	console.log(
-		`\n🔍 Finding optimal trade paths for ${pickQueue.length} picks...`,
-	);
 
 	for (const pick of pickQueue) {
-		console.log(
-			`\n🔁 Finding optimal trade up path for pick: ${await bbgm.helpers.pickDesc(pick, "short")}`,
-		);
-
 		// Get current negative players (updated after each trade)
 		const negativePlayers = await getNegativeValuePlayers(draftYear);
-		console.log(
-			`Found ${negativePlayers.length} negative value players to potentially dump`,
-		);
 
 		const path = await findOptimalTradeUpPath(pick, negativePlayers);
 		if (path && path.length > 0) {
-			console.log(`   📊 Found optimal path with ${path.length} trades`);
-
 			const success = await executeTradeUpPath(path);
 			if (success) {
 				tradesExecuted += path.length;
-				console.log(`   ✅ Successfully executed ${path.length} trades`);
-			} else {
-				console.log("   ❌ Trade path execution failed");
 			}
-		} else {
-			console.log("   ❌ No viable trade path found");
 		}
 	}
 
 	// Step 2: Try to acquire free picks (by taking on negative value players)
-	console.log(
-		"\n=== Step 2: Acquiring picks by taking on negative value players ===",
-	);
 	const picksBefore = (await getUserDraftPicks()).map((p) => p.dpid);
 	const freePicksAcquired = await acquireFreePicks();
 	const picksAfter = (await getUserDraftPicks()).map((p) => p.dpid);
@@ -914,9 +860,6 @@ async function optimizeDraftTrades() {
 
 	// Step 3: Trade up from the newly acquired free picks (optimal path-dependent)
 	if (newFreePickDpids.length > 0) {
-		console.log(
-			"\n=== Step 3: Trading up from newly acquired free picks (optimal path-dependent) ===",
-		);
 		let freePickTradesExecuted = 0;
 		const seenFreeDpids = new Set();
 		const freePicksToTry = (await getUserDraftPicks())
@@ -937,9 +880,6 @@ async function optimizeDraftTrades() {
 				}
 			}
 		}
-		console.log(
-			`Total trades executed from free picks: ${freePickTradesExecuted}`,
-		);
 	}
 
 	console.log(`\n🎉 Draft trade optimization complete!`);
