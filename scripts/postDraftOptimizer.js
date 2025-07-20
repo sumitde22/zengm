@@ -812,14 +812,14 @@ async function acquireProspectsThroughChaining() {
 			`   📊 Taking prospects + their bad contracts = ${prospectsAndBadContractsDV.toFixed(2)} DV`,
 		);
 
+		let bestTrade = null;
+		let maxNegativeDV = 0;
+
 		// Only test combinations of our bad contracts that are less negative than that DV
 		if (prospectsAndBadContractsDV > 0 && currentBadContracts.length > 0) {
 			console.log(
 				`   🔄 Testing our bad contract combinations (must be less than ${prospectsAndBadContractsDV.toFixed(2)} negative DV)...`,
 			);
-
-			let bestTrade = null;
-			let maxNegativeDV = 0;
 
 			// Sort our bad contracts by negative DV (most negative first)
 			const sortedOurBadContracts = [...currentBadContracts].sort(
@@ -884,86 +884,102 @@ async function acquireProspectsThroughChaining() {
 
 				await new Promise((resolve) => setTimeout(resolve, 50));
 			}
-
-			if (bestTrade) {
-				teamTrades.push(bestTrade);
-				currentBadContracts.push(...bestTrade.badContracts);
-				console.log(
-					`   🏆 Best trade executed: Dumping ${maxNegativeDV.toFixed(1)} negative DV`,
-				);
-			} else {
-				console.log(`   ❌ No viable combinations of our bad contracts found`);
-			}
-		} else {
-			console.log(
-				`   ❌ No positive DV from prospects + bad contracts, or no bad contracts to dump`,
-			);
 		}
 
-		if (bestTrade) {
-			teamTrades.push(bestTrade);
-			currentBadContracts.push(...bestTrade.badContracts);
+		// If no trade with our bad contracts, try with just their bad contracts
+		if (!bestTrade) {
 			console.log(
-				`   🏆 Best trade executed: Dumping ${maxNegativeDV.toFixed(1)} negative DV`,
+				`   🔄 No trade with our bad contracts, trying with just their bad contracts...`,
 			);
-		} else {
-			// If still no trade, try removing worst prospects
-			if (!foundTrade) {
-				console.log(
-					`   ❌ No trade possible with any bad contract combination, removing worst prospects...`,
+
+			const tradeResult = await testProspectTrade(
+				sortedProspects,
+				badContracts,
+			);
+
+			if (tradeResult.possible) {
+				console.log(`   ✅ Trade possible with just their bad contracts!`);
+
+				const success = await executeProspectTrade(
+					sortedProspects,
+					badContracts,
 				);
 
-				let testProspects = [...sortedProspects];
-
-				while (testProspects.length > 0) {
-					testProspects.pop(); // Remove worst prospect
-
-					if (testProspects.length === 0) {
-						console.log(`   ❌ No viable trade possible with any prospects`);
-						break;
-					}
-
-					console.log(
-						`   🔄 Testing with ${testProspects.length} prospects (removed ${sortedProspects.length - testProspects.length} worst)...`,
-					);
-
-					// Try with all bad contracts first
-					const tradeResult = await testProspectTrade(
-						testProspects,
-						badContracts,
-					);
-
-					if (tradeResult.possible) {
-						console.log(
-							`   ✅ Trade possible with ${testProspects.length} prospects!`,
-						);
-
-						const success = await executeProspectTrade(
-							testProspects,
-							badContracts,
-						);
-
-						if (success) {
-							teamTrades.push({
-								prospects: testProspects,
-								badContracts,
-								valueChange: tradeResult.valueChange,
-							});
-							currentBadContracts.push(...badContracts);
-							console.log(`   🎉 Trade successful!`);
-						}
-						break;
-					}
-
-					await new Promise((resolve) => setTimeout(resolve, 50));
+				if (success) {
+					bestTrade = {
+						prospects: sortedProspects,
+						badContracts: badContracts,
+						valueChange: tradeResult.valueChange,
+					};
+					maxNegativeDV = 0; // No negative DV dumped
+					console.log(`   🎉 Trade successful!`);
 				}
 			}
 		}
 
-		successfulTrades.push(...teamTrades);
-		currentBadContracts.push(...teamTrades.map((t) => t.badContract));
+		// If still no trade, try removing worst prospects
+		if (!bestTrade) {
+			console.log(
+				`   ❌ No trade possible with any bad contract combination, removing worst prospects...`,
+			);
+
+			let testProspects = [...sortedProspects];
+
+			while (testProspects.length > 0) {
+				testProspects.pop(); // Remove worst prospect
+
+				if (testProspects.length === 0) {
+					console.log(`   ❌ No viable trade possible with any prospects`);
+					break;
+				}
+
+				console.log(
+					`   🔄 Testing with ${testProspects.length} prospects (removed ${sortedProspects.length - testProspects.length} worst)...`,
+				);
+
+				// Try with all bad contracts first
+				const tradeResult = await testProspectTrade(
+					testProspects,
+					badContracts,
+				);
+
+				if (tradeResult.possible) {
+					console.log(
+						`   ✅ Trade possible with ${testProspects.length} prospects!`,
+					);
+
+					const success = await executeProspectTrade(
+						testProspects,
+						badContracts,
+					);
+
+					if (success) {
+						bestTrade = {
+							prospects: testProspects,
+							badContracts: badContracts,
+							valueChange: tradeResult.valueChange,
+						};
+						maxNegativeDV = 0; // No negative DV dumped
+						console.log(`   🎉 Trade successful!`);
+					}
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 50));
+			}
+		}
+
+		// Add successful trade to results
+		if (bestTrade) {
+			successfulTrades.push(bestTrade);
+			currentBadContracts.push(...bestTrade.badContracts);
+			console.log(
+				`   🏆 Best trade executed: Dumping ${maxNegativeDV.toFixed(1)} negative DV`,
+			);
+		}
+
 		console.log(
-			`   📊 Team complete: ${teamTrades.length} trades, ${teamTrades.reduce((sum, t) => sum + t.prospects.length, 0)} prospects acquired`,
+			`   📊 Team complete: ${bestTrade ? 1 : 0} trades, ${bestTrade ? bestTrade.prospects.length : 0} prospects acquired`,
 		);
 	}
 
@@ -985,39 +1001,25 @@ async function postDraftOptimize() {
 	console.log("🚀 Starting Post-Draft Optimization...");
 	console.log("=".repeat(50));
 
-	// Step 1: Identify dumpable contracts
-	const results = await identifyDumpableContracts();
-
-	if (results.dumpable.length === 0) {
-		console.log("❌ No dumpable contracts found");
-		return;
-	}
-
-	// Step 2: Find and execute prospect trades
-	const prospectTrades = await findProspectTrades(results.dumpable);
-
-	// Step 3: Acquire prospects through bad contract chaining
+	// Step 1: Acquire prospects through bad contract chaining
 	const chainingResults = await acquireProspectsThroughChaining();
 
 	console.log(`\n🎉 Post-Draft Optimization Complete!`);
-	console.log(`Dumpable contract trades: ${prospectTrades.length}`);
 	console.log(`Prospect acquisition trades: ${chainingResults.trades.length}`);
 	console.log(
 		`Final bad contracts held: ${chainingResults.finalBadContracts.length}`,
 	);
 
 	return {
-		dumpableContracts: results.dumpable.length,
-		prospectTrades: prospectTrades.length,
 		acquisitionTrades: chainingResults.trades.length,
 		finalBadContracts: chainingResults.finalBadContracts.length,
-		trades: [...prospectTrades, ...chainingResults.trades],
+		trades: chainingResults.trades,
 	};
 }
 
 // Export the main function
 if (typeof module !== "undefined" && module.exports) {
-	module.exports = { postDraftOptimize, identifyDumpableContracts };
+	module.exports = { postDraftOptimize };
 } else {
 	// Run in worker console
 	postDraftOptimize().catch(console.error);
