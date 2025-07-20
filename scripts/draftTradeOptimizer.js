@@ -132,17 +132,39 @@ async function evaluateTrade(teams) {
 			// If warning is about user team, ignore it since we have cap space
 		}
 
-		const dv = await bbgm.team.valueChange(
-			teams[1].tid,
-			teams[0].pids,
-			teams[1].pids,
-			teams[0].dpids,
-			teams[1].dpids,
+		// Calculate value change from CPU team's perspective (they need to accept the trade)
+		const cpuDv = await bbgm.team.valueChange(
+			teams[1].tid, // CPU team
+			teams[0].pids, // What they're getting
+			teams[1].pids, // What they're giving
+			teams[0].dpids, // Draft picks they're getting
+			teams[1].dpids, // Draft picks they're giving
 			undefined,
-			teams[0].tid,
+			teams[0].tid, // Our team
 			[],
 		);
-		return dv;
+
+		// For debugging: also calculate our perspective
+		const ourDv = await bbgm.team.valueChange(
+			teams[0].tid, // Our team
+			teams[1].pids, // What we're getting
+			teams[0].pids, // What we're giving
+			teams[1].dpids, // Draft picks we're getting
+			teams[0].dpids, // Draft picks we're giving
+			undefined,
+			teams[1].tid, // Other team
+			[],
+		);
+
+		// Debug: show both perspectives occasionally (reduced frequency)
+		if (Math.random() < 0.001) {
+			// 0.1% chance to show debug
+			console.log(
+				`      🔍 DEBUG: CPU DV: ${cpuDv.toFixed(2)}, Our DV: ${ourDv.toFixed(2)}`,
+			);
+		}
+
+		return cpuDv; // Return CPU team's value change (they need to accept)
 	} catch (error) {
 		console.log("Error evaluating trade:", error);
 		return -Infinity;
@@ -468,10 +490,22 @@ async function findOptimalTradeUpPath(
 	const queue = [{ key: startKey, cost: 0 }];
 
 	let dijkstraIterations = 0;
-	const maxDijkstraIterations = 1000; // Safety guard for Dijkstra's
+	const maxDijkstraIterations = 500; // Reduced safety guard for Dijkstra's
+	let totalTradeEvaluations = 0;
+	let totalTradeEvaluationTime = 0;
+
+	console.log(
+		`   🔍 Starting Dijkstra with ${picksList.length} potential picks to evaluate...`,
+	);
 
 	while (queue.length > 0 && dijkstraIterations < maxDijkstraIterations) {
 		dijkstraIterations++;
+
+		if (dijkstraIterations % 50 === 0) {
+			console.log(
+				`   🔄 Dijkstra iteration ${dijkstraIterations}/${maxDijkstraIterations} (${queue.length} nodes in queue, ${totalTradeEvaluations} trades evaluated, ${totalTradeEvaluationTime}ms)`,
+			);
+		}
 
 		// Get node with lowest cost (simple min find instead of full sort)
 		let minIndex = 0;
@@ -541,8 +575,10 @@ async function findOptimalTradeUpPath(
 				bestOurDumpValue = 0; // No players dumped
 			}
 
-			// Try all combinations of their negative players (minimize what we take on)
-			const maxComboSize = negPlayers.length;
+			// Smart combination testing: generate all valid combinations and test in optimal order
+			const allValidCombinations = [];
+			let tradeEvaluationsForThisPick = 0;
+			let tradeEvaluationTimeForThisPick = 0;
 
 			// Helper function to generate combinations
 			function generateCombinations(arr, size) {
@@ -559,58 +595,160 @@ async function findOptimalTradeUpPath(
 				return [...withoutFirst, ...withFirst];
 			}
 
-			// Try combinations of 1 to maxComboSize of their negative players
-			for (let comboSize = 1; comboSize <= maxComboSize; comboSize++) {
-				const combinations = generateCombinations(negPlayers, comboSize);
-				for (const combo of combinations) {
-					baseTeams[1].pids = combo.map((p) => p.pid);
-					currentDv = await evaluateTrade(baseTeams);
-					const currentTotalNegValue = combo.reduce(
-						(sum, p) => sum + Math.abs(p.value),
-						0,
-					);
+			// SMART HEURISTIC SEARCH: Find optimal trade without testing every combination
 
-					if (currentDv > 0 && currentTotalNegValue < bestTotalNegValue) {
-						bestDv = currentDv;
-						bestComboPids = [...baseTeams[1].pids];
-						bestTotalNegValue = currentTotalNegValue;
-						bestOurDumpValue = 0; // No our players dumped yet
+			// Sort their negative players by value (least negative first - most likely to work)
+			const sortedNegPlayers = [...negPlayers].sort(
+				(a, b) => b.value - a.value,
+			);
+
+			// Sort our negative players by value (most negative first - we want to dump these)
+			const sortedOurNegativePlayers = [...negativePlayers].sort(
+				(a, b) => a.value - b.value,
+			);
+
+			// Strategy 1: Try single best players first (most likely to work)
+			let bestTrade = null;
+			let bestScore = -Infinity;
+
+			// Test single players first (most efficient)
+			for (const theirPlayer of sortedNegPlayers.slice(0, 10)) {
+				// Top 10 most valuable
+				baseTeams[1].pids = [theirPlayer.pid];
+				baseTeams[0].pids = [];
+
+				const evalStartTime = Date.now();
+				const theirOnlyDv = await evaluateTrade(baseTeams);
+				const evalTime = Date.now() - evalStartTime;
+
+				tradeEvaluationsForThisPick++;
+				tradeEvaluationTimeForThisPick += evalTime;
+				totalTradeEvaluations++;
+				totalTradeEvaluationTime += evalTime;
+
+				if (theirOnlyDv > 0) {
+					const score = theirOnlyDv - Math.abs(theirPlayer.value) * 0.1;
+					if (score > bestScore) {
+						bestScore = score;
+						bestTrade = {
+							theirPlayers: [theirPlayer],
+							ourPlayers: [],
+							totalNegValue: Math.abs(theirPlayer.value),
+							ourDumpValue: 0,
+							dv: theirOnlyDv,
+							score: score,
+						};
 					}
+				}
+			}
 
-					// Try combinations of our negative players to dump (1+ players)
-					const maxOurComboSize = negativePlayers.length;
-					for (
-						let ourComboSize = 1;
-						ourComboSize <= maxOurComboSize;
-						ourComboSize++
-					) {
-						const ourCombinations = generateCombinations(
-							negativePlayers,
-							ourComboSize,
-						);
-						for (const ourCombo of ourCombinations) {
-							baseTeams[0].pids = ourCombo.map((p) => p.pid);
-							currentDv = await evaluateTrade(baseTeams);
-							const currentOurDumpValue = ourCombo.reduce(
-								(sum, p) => sum + p.value,
-								0,
-							); // p.value is already negative
+			// Strategy 2: Try best 2-player combinations (if single players didn't work well)
+			if (!bestTrade || bestTrade.dv < 0.5) {
+				// If no good single trades, try pairs
 
-							// Prioritize trades that dump our negative players
-							// Accept if we're dumping more negative value OR if we're taking on less negative value
-							if (
-								currentDv > 0 &&
-								(currentOurDumpValue < bestOurDumpValue ||
-									currentTotalNegValue < bestTotalNegValue)
-							) {
-								bestDv = currentDv;
-								bestComboPids = [...baseTeams[1].pids];
-								bestOurNegPids = [...baseTeams[0].pids];
-								bestTotalNegValue = currentTotalNegValue;
-								bestOurDumpValue = currentOurDumpValue;
+				for (let i = 0; i < Math.min(5, sortedNegPlayers.length); i++) {
+					for (let j = i + 1; j < Math.min(10, sortedNegPlayers.length); j++) {
+						const player1 = sortedNegPlayers[i];
+						const player2 = sortedNegPlayers[j];
+
+						baseTeams[1].pids = [player1.pid, player2.pid];
+						baseTeams[0].pids = [];
+
+						const evalStartTime = Date.now();
+						const theirOnlyDv = await evaluateTrade(baseTeams);
+						const evalTime = Date.now() - evalStartTime;
+
+						tradeEvaluationsForThisPick++;
+						tradeEvaluationTimeForThisPick += evalTime;
+						totalTradeEvaluations++;
+						totalTradeEvaluationTime += evalTime;
+
+						if (theirOnlyDv > 0) {
+							const totalNegValue =
+								Math.abs(player1.value) + Math.abs(player2.value);
+							const score = theirOnlyDv - totalNegValue * 0.1;
+							if (score > bestScore) {
+								bestScore = score;
+								bestTrade = {
+									theirPlayers: [player1, player2],
+									ourPlayers: [],
+									totalNegValue: totalNegValue,
+									ourDumpValue: 0,
+									dv: theirOnlyDv,
+									score: score,
+								};
 							}
 						}
 					}
+				}
+			}
+
+			// Strategy 3: Try adding our worst players to sweeten deals
+			if (
+				bestTrade &&
+				bestTrade.dv < 1.0 &&
+				sortedOurNegativePlayers.length > 0
+			) {
+				// Try adding our worst player to the best trade
+				const worstOurPlayer = sortedOurNegativePlayers[0];
+				baseTeams[1].pids = bestTrade.theirPlayers.map((p) => p.pid);
+				baseTeams[0].pids = [worstOurPlayer.pid];
+
+				const evalStartTime = Date.now();
+				const combinedDv = await evaluateTrade(baseTeams);
+				const evalTime = Date.now() - evalStartTime;
+
+				tradeEvaluationsForThisPick++;
+				tradeEvaluationTimeForThisPick += evalTime;
+				totalTradeEvaluations++;
+				totalTradeEvaluationTime += evalTime;
+
+				if (combinedDv > bestTrade.dv) {
+					const newScore =
+						combinedDv -
+						bestTrade.totalNegValue * 0.1 +
+						Math.abs(worstOurPlayer.value) * 0.2;
+					bestTrade = {
+						theirPlayers: bestTrade.theirPlayers,
+						ourPlayers: [worstOurPlayer],
+						totalNegValue: bestTrade.totalNegValue,
+						ourDumpValue: worstOurPlayer.value,
+						dv: combinedDv,
+						score: newScore,
+					};
+				}
+			}
+
+			// Add the best trade to our list if we found one
+			if (bestTrade) {
+				allValidCombinations.push(bestTrade);
+			}
+
+			if (tradeEvaluationsForThisPick > 0) {
+				console.log(
+					`      📊 Evaluated ${tradeEvaluationsForThisPick} trades for this pick (${tradeEvaluationTimeForThisPick}ms, avg ${(tradeEvaluationTimeForThisPick / tradeEvaluationsForThisPick).toFixed(1)}ms per trade)`,
+				);
+			}
+
+			// Sort combinations by score (best first)
+			allValidCombinations.sort((a, b) => b.score - a.score);
+
+			// Test combinations in optimal order (limit to top 10 to avoid too many tests)
+			for (const combo of allValidCombinations.slice(0, 10)) {
+				const { theirPlayers, ourPlayers, totalNegValue, ourDumpValue, dv } =
+					combo;
+
+				// Check if this is better than our current best
+				if (
+					dv > 0 &&
+					(ourDumpValue < bestOurDumpValue || totalNegValue < bestTotalNegValue)
+				) {
+					bestDv = dv;
+					bestComboPids = theirPlayers.map((p) => p.pid);
+					bestOurNegPids = ourPlayers.map((p) => p.pid);
+					bestTotalNegValue = totalNegValue;
+					bestOurDumpValue = ourDumpValue;
+					break; // Take the first (best) successful combination
 				}
 			}
 
@@ -731,64 +869,36 @@ async function optimizeDraftTrades() {
 	const pickQueue = userPicksInitial.slice(); // Only current season picks
 	const processedDpids = new Set();
 
-	// Process picks in queue until no more trades are possible
-	let iterationCount = 0;
-	const maxIterations = 100; // Safety guard to prevent infinite loops
+	// Find and execute optimal trade paths for each pick
+	console.log(
+		`\n🔍 Finding optimal trade paths for ${pickQueue.length} picks...`,
+	);
 
-	while (pickQueue.length > 0 && iterationCount < maxIterations) {
-		iterationCount++;
-		console.log(`\n--- Iteration ${iterationCount} ---`);
-
-		const pick = pickQueue.shift(); // Get next pick from queue
-
-		if (processedDpids.has(pick.dpid)) {
-			continue;
-		}
-
+	for (const pick of pickQueue) {
 		console.log(
 			`\n🔁 Finding optimal trade up path for pick: ${await bbgm.helpers.pickDesc(pick, "short")}`,
 		);
+
 		// Get current negative players (updated after each trade)
 		const negativePlayers = await getNegativeValuePlayers(draftYear);
 		console.log(
 			`Found ${negativePlayers.length} negative value players to potentially dump`,
 		);
+
 		const path = await findOptimalTradeUpPath(pick, negativePlayers);
 		if (path && path.length > 0) {
+			console.log(`   📊 Found optimal path with ${path.length} trades`);
+
 			const success = await executeTradeUpPath(path);
 			if (success) {
 				tradesExecuted += path.length;
-
-				// Add newly acquired picks to the front of the queue (they're better)
-				const newPicks = await getUserDraftPicks();
-				const oldPickDpids = new Set(pickQueue.map((p) => p.dpid));
-
-				// Add new picks that weren't in the queue before, but only from the current draft year
-				let newPicksAdded = 0;
-				for (const newPick of newPicks) {
-					if (newPick.season !== draftYear) continue; // Only add picks from the current draft year
-					if (
-						!oldPickDpids.has(newPick.dpid) &&
-						!processedDpids.has(newPick.dpid)
-					) {
-						pickQueue.unshift(newPick); // Add to front since they're better
-						newPicksAdded++;
-					}
-				}
+				console.log(`   ✅ Successfully executed ${path.length} trades`);
 			} else {
-				// Trade failed, mark this pick as processed so we don't try it again
-				console.log("Trade failed, marking pick as processed.");
-				processedDpids.add(pick.dpid);
+				console.log("   ❌ Trade path execution failed");
 			}
 		} else {
-			processedDpids.add(pick.dpid);
+			console.log("   ❌ No viable trade path found");
 		}
-	}
-
-	if (iterationCount >= maxIterations) {
-		console.log(
-			"⚠️  Reached maximum iterations, stopping to prevent infinite loop",
-		);
 	}
 
 	// Step 2: Try to acquire free picks (by taking on negative value players)
