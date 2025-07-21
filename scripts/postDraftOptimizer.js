@@ -119,9 +119,11 @@ async function identifyDumpableContracts() {
 	console.log("🔍 Identifying dumpable contracts...");
 
 	const gameState = getGameState();
+	console.log(`📊 Season: ${gameState.season}, Team: ${gameState.userTid}`);
 
 	// Step 1: Get all your players
 	const players = await getCurrentPlayers();
+	console.log(`👥 Total players on your team: ${players.length}`);
 
 	// Step 2: Filter out untradable players and protected players
 	const tradablePlayers = players.filter((p) => {
@@ -143,6 +145,8 @@ async function identifyDumpableContracts() {
 			!(p.draft && p.draft.year === gameState.season)
 		);
 	});
+
+	console.log(`✅ Tradable players after filtering: ${tradablePlayers.length}`);
 
 	// Step 3: Get worst picks from teams (contending teams first, fallback to all teams)
 	const worstPicksResult = await getTeamsWorstPicks();
@@ -406,10 +410,6 @@ async function getAllProspects() {
 		tier2: [], // High potential non-draft picks
 	};
 
-	let totalPlayersChecked = 0;
-	let highPotentialPlayers = 0;
-	let salaryFilteredPlayers = 0;
-
 	for (const team of otherTeams) {
 		let teamPlayers;
 		try {
@@ -423,39 +423,18 @@ async function getAllProspects() {
 			continue;
 		}
 		for (const player of teamPlayers) {
-			totalPlayersChecked++;
-
 			if (player.draft && player.draft.year === gameState.draftYear) {
 				prospects.tier1.push(player);
 				continue;
 			}
 			if (player.ratings.pot >= 50) {
-				highPotentialPlayers++;
 				const salaryLimit = getSalaryLimit(player.ratings.pot);
-				const playerSalary = player.contract.amount * 1000;
-
-				if (playerSalary <= salaryLimit) {
+				if (player.contract.amount * 1000 <= salaryLimit) {
 					prospects.tier2.push(player);
-				} else {
-					salaryFilteredPlayers++;
-					// Debug: log some examples of players filtered out by salary
-					if (salaryFilteredPlayers <= 5) {
-						console.log(
-							`   💰 Salary filtered: ${player.firstName} ${player.lastName} (pot: ${player.ratings.pot}, salary: $${(playerSalary / 1000000).toFixed(1)}M, limit: $${(salaryLimit / 1000000).toFixed(1)}M)`,
-						);
-					}
 				}
 			}
 		}
 	}
-
-	console.log(
-		`🔍 Prospect analysis: ${totalPlayersChecked} players checked, ${highPotentialPlayers} high potential, ${salaryFilteredPlayers} filtered by salary`,
-	);
-	console.log(
-		`   Tier 1 prospects: ${prospects.tier1.length}, Tier 2 prospects: ${prospects.tier2.length}`,
-	);
-
 	return prospects;
 }
 
@@ -959,6 +938,19 @@ async function acquireProspectsThroughChaining() {
 // Main optimization function
 async function postDraftOptimize() {
 	console.log("🚀 Starting Post-Draft Optimization...");
+
+	// Check if you have any players first
+	const players = await getCurrentPlayers();
+
+	if (players.length === 0) {
+		console.log(
+			"📝 No players on your team - proceeding directly to prospect acquisition",
+		);
+		// Phase 2: Use cap space/bad contracts to acquire prospects via chaining
+		const chainingResults = await acquireProspectsThroughChaining();
+		console.log("✅ Post-draft optimization complete!");
+		return;
+	}
 
 	// Phase 1: Dump bad/neutral contracts for anything
 	const dumpResult = await identifyDumpableContracts();
