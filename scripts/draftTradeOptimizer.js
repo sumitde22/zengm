@@ -192,11 +192,10 @@ function createTradeStructure(
 
 // Execute a trade and return success status
 async function executeTrade(teams, description) {
-	console.log(`🔄 ${description}`);
 	await bbgm.trade.create(teams);
 	const [success, message] = await bbgm.trade.propose(false);
 	if (success) {
-		console.log(`✅ Trade successful: ${message}`);
+		console.log(`✅ ${description}`);
 	} else {
 		console.log(`❌ Trade failed: ${message}`);
 	}
@@ -660,9 +659,6 @@ async function findOptimalTradeUpPath(
 
 			// Strategy 3: Try adding our negative players to sweeten the best trade found
 			if (bestTrade && sortedOurNegativePlayers.length > 0) {
-				console.log(
-					`   🔍 Trying to sweeten trade with ${sortedOurNegativePlayers.length} negative players (best trade DV: ${bestTrade.dv.toFixed(2)})`,
-				);
 				// Try adding 1-2 of our least negative players to the best trade
 				const maxOurPlayersToTry = Math.min(2, sortedOurNegativePlayers.length);
 				let foundAnyImprovement = false;
@@ -707,13 +703,6 @@ async function findOptimalTradeUpPath(
 								bestTrade.totalNegValue * 0.1 +
 								Math.abs(totalOurDumpValue) * 0.3;
 
-							console.log(
-								`   ✅ Success! Added ${ourPlayersToTry.length} players: ${ourPlayersToTry.map((p) => `${p.firstName} ${p.lastName} (${p.value.toFixed(1)})`).join(", ")}`,
-							);
-							console.log(
-								`      DV improved: ${bestTrade.dv.toFixed(2)} → ${combinedDv.toFixed(2)} (dump value: ${totalOurDumpValue.toFixed(1)})`,
-							);
-
 							bestTrade = {
 								theirPlayers: bestTrade.theirPlayers,
 								ourPlayers: ourPlayersToTry,
@@ -725,17 +714,11 @@ async function findOptimalTradeUpPath(
 							foundAnyImprovement = true;
 						} else {
 							// Early exit: if CPU won't accept this "least bad" contract, they won't accept worse ones
-							console.log(
-								`   ❌ Rejected: ${ourPlayersToTry.map((p) => `${p.firstName} ${p.lastName} (${p.value.toFixed(1)})`).join(", ")} - DV: ${combinedDv.toFixed(2)} vs ${bestTrade.dv.toFixed(2)}`,
-							);
 							break;
 						}
 					}
 					// Early exit: if we couldn't add any single player, don't try combinations
 					if (numOurPlayers === 1 && !foundAnyImprovement) {
-						console.log(
-							`   🚫 No single players accepted, skipping combinations`,
-						);
 						break;
 					}
 				}
@@ -792,9 +775,7 @@ async function findOptimalTradeUpPath(
 	}
 
 	if (dijkstraIterations >= maxDijkstraIterations) {
-		console.log(
-			"⚠️  Dijkstra's algorithm reached maximum iterations, stopping to prevent infinite loop",
-		);
+		console.log("⚠️  Reached maximum iterations, stopping");
 	}
 
 	// Find the best pick reachable (lowest round, lowest pick) with a path
@@ -851,10 +832,6 @@ async function executeTradeUpPath(path) {
 
 // Main function to optimize draft trades (optimal path-dependent)
 async function optimizeDraftTrades() {
-	console.log(
-		"🚀 Starting optimal draft trade optimization (path-dependent)...",
-	);
-
 	// Validate that we're running during the draft phase
 	const currentPhase = bbgm.g.get("phase");
 
@@ -881,10 +858,11 @@ async function optimizeDraftTrades() {
 	// Step 1: Trade up from existing picks (optimal path-dependent)
 	let tradesExecuted = 0;
 	const pickQueue = userPicksInitial.slice(); // Only current season picks
-	const processedDpids = new Set();
+
+	// Get initial negative players
+	const initialNegativePlayers = await getNegativeValuePlayers(draftYear);
 
 	// Find and execute optimal trade paths for each pick
-
 	for (const pick of pickQueue) {
 		// Get current negative players (updated after each trade)
 		const negativePlayers = await getNegativeValuePlayers(draftYear);
@@ -931,10 +909,8 @@ async function optimizeDraftTrades() {
 	}
 
 	console.log(`\n🎉 Draft trade optimization complete!`);
-	console.log(`Total trades executed from original picks: ${tradesExecuted}`);
-	console.log(
-		`Total picks acquired by taking on negative value: ${freePicksAcquired}`,
-	);
+	console.log(`Total trades executed: ${tradesExecuted}`);
+	console.log(`Free picks acquired: ${freePicksAcquired}`);
 
 	// Show final draft picks
 	const finalPicks = await getUserDraftPicks();
