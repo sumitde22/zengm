@@ -577,9 +577,9 @@ async function findOptimalTradeUpPath(
 				(a, b) => b.value - a.value,
 			);
 
-			// Sort our negative players by value (most negative first - we want to dump these)
+			// Sort our negative players by value (least negative first - most likely to be accepted)
 			const sortedOurNegativePlayers = [...negativePlayers].sort(
-				(a, b) => a.value - b.value,
+				(a, b) => b.value - a.value,
 			);
 
 			// Strategy 1: Try single best players first (most likely to work)
@@ -658,39 +658,86 @@ async function findOptimalTradeUpPath(
 				}
 			}
 
-			// Strategy 3: Try adding our worst players to sweeten deals
-			if (
-				bestTrade &&
-				bestTrade.dv < 1.0 &&
-				sortedOurNegativePlayers.length > 0
-			) {
-				// Try adding our worst player to the best trade
-				const worstOurPlayer = sortedOurNegativePlayers[0];
-				baseTeams[1].pids = bestTrade.theirPlayers.map((p) => p.pid);
-				baseTeams[0].pids = [worstOurPlayer.pid];
+			// Strategy 3: Try adding our negative players to sweeten the best trade found
+			if (bestTrade && sortedOurNegativePlayers.length > 0) {
+				console.log(
+					`   🔍 Trying to sweeten trade with ${sortedOurNegativePlayers.length} negative players (best trade DV: ${bestTrade.dv.toFixed(2)})`,
+				);
+				// Try adding 1-2 of our least negative players to the best trade
+				const maxOurPlayersToTry = Math.min(2, sortedOurNegativePlayers.length);
+				let foundAnyImprovement = false;
 
-				const evalStartTime = Date.now();
-				const combinedDv = await evaluateTrade(baseTeams);
-				const evalTime = Date.now() - evalStartTime;
+				for (
+					let numOurPlayers = 1;
+					numOurPlayers <= maxOurPlayersToTry;
+					numOurPlayers++
+				) {
+					// Try combinations of our least negative players (most likely to be accepted)
+					for (
+						let i = 0;
+						i <= sortedOurNegativePlayers.length - numOurPlayers;
+						i++
+					) {
+						const ourPlayersToTry = sortedOurNegativePlayers.slice(
+							i,
+							i + numOurPlayers,
+						);
 
-				tradeEvaluationsForThisPick++;
-				tradeEvaluationTimeForThisPick += evalTime;
-				totalTradeEvaluations++;
-				totalTradeEvaluationTime += evalTime;
+						baseTeams[1].pids = bestTrade.theirPlayers.map((p) => p.pid);
+						baseTeams[0].pids = ourPlayersToTry.map((p) => p.pid);
 
-				if (combinedDv > bestTrade.dv) {
-					const newScore =
-						combinedDv -
-						bestTrade.totalNegValue * 0.1 +
-						Math.abs(worstOurPlayer.value) * 0.2;
-					bestTrade = {
-						theirPlayers: bestTrade.theirPlayers,
-						ourPlayers: [worstOurPlayer],
-						totalNegValue: bestTrade.totalNegValue,
-						ourDumpValue: worstOurPlayer.value,
-						dv: combinedDv,
-						score: newScore,
-					};
+						const evalStartTime = Date.now();
+						const combinedDv = await evaluateTrade(baseTeams);
+						const evalTime = Date.now() - evalStartTime;
+
+						tradeEvaluationsForThisPick++;
+						tradeEvaluationTimeForThisPick += evalTime;
+						totalTradeEvaluations++;
+						totalTradeEvaluationTime += evalTime;
+
+						if (combinedDv > bestTrade.dv) {
+							const totalOurDumpValue = ourPlayersToTry.reduce(
+								(sum, p) => sum + p.value,
+								0,
+							);
+
+							// Sweeten the deal by dumping our negative players
+							const score =
+								combinedDv -
+								bestTrade.totalNegValue * 0.1 +
+								Math.abs(totalOurDumpValue) * 0.3;
+
+							console.log(
+								`   ✅ Success! Added ${ourPlayersToTry.length} players: ${ourPlayersToTry.map((p) => `${p.firstName} ${p.lastName} (${p.value.toFixed(1)})`).join(", ")}`,
+							);
+							console.log(
+								`      DV improved: ${bestTrade.dv.toFixed(2)} → ${combinedDv.toFixed(2)} (dump value: ${totalOurDumpValue.toFixed(1)})`,
+							);
+
+							bestTrade = {
+								theirPlayers: bestTrade.theirPlayers,
+								ourPlayers: ourPlayersToTry,
+								totalNegValue: bestTrade.totalNegValue,
+								ourDumpValue: totalOurDumpValue,
+								dv: combinedDv,
+								score: score,
+							};
+							foundAnyImprovement = true;
+						} else {
+							// Early exit: if CPU won't accept this "least bad" contract, they won't accept worse ones
+							console.log(
+								`   ❌ Rejected: ${ourPlayersToTry.map((p) => `${p.firstName} ${p.lastName} (${p.value.toFixed(1)})`).join(", ")} - DV: ${combinedDv.toFixed(2)} vs ${bestTrade.dv.toFixed(2)}`,
+							);
+							break;
+						}
+					}
+					// Early exit: if we couldn't add any single player, don't try combinations
+					if (numOurPlayers === 1 && !foundAnyImprovement) {
+						console.log(
+							`   🚫 No single players accepted, skipping combinations`,
+						);
+						break;
+					}
 				}
 			}
 
@@ -708,9 +755,10 @@ async function findOptimalTradeUpPath(
 					combo;
 
 				// Check if this is better than our current best
+				// Prioritize trades that dump our negative players (higher ourDumpValue is better)
 				if (
 					dv > 0 &&
-					(ourDumpValue < bestOurDumpValue || totalNegValue < bestTotalNegValue)
+					(ourDumpValue > bestOurDumpValue || totalNegValue < bestTotalNegValue)
 				) {
 					bestDv = dv;
 					bestComboPids = theirPlayers.map((p) => p.pid);
