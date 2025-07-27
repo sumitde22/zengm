@@ -480,6 +480,7 @@ async function findBadContracts(teamTid) {
 				[], // CPU gives no picks
 				undefined,
 				bbgm.g.get("userTid"),
+				[], // Extra parameter
 			);
 
 			// If dv >= 0, team would accept getting rid of this player (bad or neutral contract)
@@ -490,6 +491,13 @@ async function findBadContracts(teamTid) {
 					valueChange: dv,
 					age: player.age,
 				});
+
+				// Debug: show the bad contracts being found
+				if (badContracts.length <= 3) {
+					console.log(
+						`     Bad contract: ${player.firstName} ${player.lastName} (age: ${player.age}, DV: ${dv.toFixed(2)})`,
+					);
+				}
 			}
 		} catch (error) {
 			// Skip if error
@@ -539,6 +547,14 @@ async function testProspectTrade(
 		},
 	];
 
+	console.log(`   🔍 Trade structure:`);
+	console.log(
+		`      We give: ${ourBadContractArray.map((bc) => bc.player.firstName + " " + bc.player.lastName).join(", ") || "nothing"}`,
+	);
+	console.log(
+		`      We get: ${prospects.map((p) => p.firstName + " " + p.lastName).join(", ")} + ${theirBadContractArray.map((bc) => bc.player.firstName + " " + bc.player.lastName).join(", ")}`,
+	);
+
 	// Check financial constraints
 	try {
 		const summary = await bbgm.trade.summary(trade);
@@ -547,28 +563,53 @@ async function testProspectTrade(
 			(summary.warning.includes("salary cap") ||
 				summary.warning.includes("cap"))
 		) {
+			console.log(`   💰 Trade rejected: Salary cap violation`);
 			return { possible: false, reason: "Salary cap violation" };
 		}
+		if (summary.warning) {
+			console.log(`   ⚠️ Trade warning: ${summary.warning}`);
+		}
 	} catch (error) {
+		console.log(`   ❌ Trade validation error: ${error.message}`);
 		return {
 			possible: false,
 			reason: `Trade validation error: ${error.message}`,
 		};
 	}
 
-	// Check if CPU would accept
+	// Check if CPU would accept - calculate from CPU team's perspective
 	try {
+		const cpuTid = prospects[0].tid;
+		const userTid = bbgm.g.get("userTid");
+		const ourPids = ourBadContractArray.map((bc) => bc.player.pid);
+		const theirPids = [
+			...prospects.map((p) => p.pid),
+			...theirBadContractArray.map((bc) => bc.player.pid),
+		];
+		console.log(`[TRADE TEST] CPU team: ${cpuTid}, User team: ${userTid}`);
+		console.log(
+			`  We give: ${ourBadContractArray.map((bc) => `${bc.player.firstName} ${bc.player.lastName} (pid ${bc.player.pid})`).join(", ") || "nothing"}`,
+		);
+		console.log(
+			`  We get: ${prospects.map((p) => `${p.firstName} ${p.lastName} (pid ${p.pid})`).join(", ")}${theirBadContractArray.length ? " + " + theirBadContractArray.map((bc) => `${bc.player.firstName} ${bc.player.lastName} (pid ${bc.player.pid})`).join(", ") : ""}`,
+		);
+		console.log(`  valueChange args: get=[${ourPids}], give=[${theirPids}]`);
 		const dv = await bbgm.team.valueChange(
-			prospects[0].tid,
-			ourBadContractArray.map((bc) => bc.player.pid), // CPU gets our bad contracts
+			cpuTid, // CPU team
+			ourBadContractArray.map((bc) => bc.player.pid), // CPU gets our bad contracts (if any)
 			[
 				...prospects.map((p) => p.pid),
 				...theirBadContractArray.map((bc) => bc.player.pid),
 			], // CPU gives prospects + their bad contracts
-			[],
-			[],
+			[], // CPU gets no picks
+			[], // CPU gives no picks
 			undefined,
-			bbgm.g.get("userTid"),
+			bbgm.g.get("userTid"), // Other team is us
+			[], // Extra parameter
+		);
+
+		console.log(
+			`   📊 Trade value change: ${dv.toFixed(2)} (${dv > 0 ? "CPU accepts" : "CPU rejects"})`,
 		);
 
 		return {
@@ -577,6 +618,7 @@ async function testProspectTrade(
 			reason: dv > 0 ? "CPU accepts" : "CPU rejects",
 		};
 	} catch (error) {
+		console.log(`   ❌ Trade value calculation error: ${error.message}`);
 		return { possible: false, reason: `Error: ${error.message}` };
 	}
 }
@@ -595,7 +637,38 @@ async function executeProspectTrade(
 		? theirBadContracts
 		: [theirBadContracts];
 
+	console.log(`   🚀 Executing trade:`);
+	console.log(
+		`      We give: ${ourBadContractArray.map((bc) => bc.player.firstName + " " + bc.player.lastName).join(", ") || "nothing"}`,
+	);
+	console.log(
+		`      We get: ${prospects.map((p) => p.firstName + " " + p.lastName).join(", ")} + ${theirBadContractArray.map((bc) => bc.player.firstName + " " + bc.player.lastName).join(", ")}`,
+	);
+
 	try {
+		console.log("--- DEBUG: trade.create call ---");
+		console.log(
+			"Trade object:",
+			JSON.stringify(
+				[
+					{
+						tid: bbgm.g.get("userTid"),
+						pids: ourBadContractArray.map((bc) => bc.player.pid),
+						dpids: [],
+					},
+					{
+						tid: prospects[0].tid,
+						pids: [
+							...prospects.map((p) => p.pid),
+							...theirBadContractArray.map((bc) => bc.player.pid),
+						],
+						dpids: [],
+					},
+				],
+				null,
+				2,
+			),
+		);
 		await bbgm.trade.create([
 			{
 				tid: bbgm.g.get("userTid"),
@@ -612,7 +685,13 @@ async function executeProspectTrade(
 			},
 		]);
 
+		console.log(`   📝 Trade created successfully`);
+
 		const [success, message] = await bbgm.trade.propose(false);
+
+		console.log(
+			`   📊 Trade proposal result: success=${success}, message=${message}`,
+		);
 
 		if (success) {
 			console.log(
@@ -620,9 +699,11 @@ async function executeProspectTrade(
 			);
 			return true;
 		} else {
+			console.log(`❌ Trade failed: ${message}`);
 			return false;
 		}
 	} catch (error) {
+		console.log(`❌ Trade error: ${error.message}`);
 		return false;
 	}
 }
@@ -657,7 +738,16 @@ async function acquireProspectsThroughChaining() {
 		"🎯 Starting prospect acquisition through bad contract chaining...",
 	);
 
+	console.log("--- DEBUG: GAME STATE ---");
+	console.log("Phase:", await bbgm.g.get("phase"));
+	console.log("Salary Cap:", await bbgm.g.get("salaryCap"));
+	console.log("User TID:", await bbgm.g.get("userTid"));
+
 	const prospects = await getAllProspects();
+	console.log(
+		`🔍 Found prospects: Tier 1 (${prospects.tier1.length}), Tier 2 (${prospects.tier2.length})`,
+	);
+
 	if (prospects.tier1.length === 0 && prospects.tier2.length === 0) {
 		console.log("❌ No prospects found to acquire");
 		return { trades: [], finalBadContracts: [] };
@@ -670,6 +760,8 @@ async function acquireProspectsThroughChaining() {
 	const allProspects = [...prospects.tier1, ...prospects.tier2];
 	const teamsWithBadContracts = [];
 
+	console.log(`🔍 Processing ${allProspects.length} prospects across teams...`);
+
 	for (const prospect of allProspects) {
 		const teamTid = prospect.tid;
 
@@ -678,6 +770,10 @@ async function acquireProspectsThroughChaining() {
 		if (!teamEntry) {
 			// Get bad contracts for this team
 			const badContracts = await findBadContracts(teamTid);
+			console.log(
+				`   Team ${teamTid}: ${badContracts.length} bad contracts found`,
+			);
+
 			if (badContracts.length > 0) {
 				// Sort bad contracts by value (closest to 0 first)
 				badContracts.sort(
@@ -704,6 +800,8 @@ async function acquireProspectsThroughChaining() {
 		}
 	}
 
+	console.log(`📊 Teams with bad contracts: ${teamsWithBadContracts.length}`);
+
 	// Sort teams by their least negative contract (closest to 0 first)
 	teamsWithBadContracts.sort(
 		(a, b) =>
@@ -717,6 +815,10 @@ async function acquireProspectsThroughChaining() {
 		teamProspects,
 		badContracts,
 	} of teamsWithBadContracts) {
+		console.log(
+			`🎯 Processing team ${teamTid}: ${teamProspects.tier1.length} tier 1, ${teamProspects.tier2.length} tier 2 prospects, ${badContracts.length} bad contracts`,
+		);
+
 		// Sort prospects by tier and value (Tier 1 first, then by value within each tier)
 		const prospectsWithValues = [];
 
@@ -742,6 +844,9 @@ async function acquireProspectsThroughChaining() {
 
 		// Try to find a trade using our bad contracts + their bad contracts
 		if (currentBadContracts.length > 0) {
+			console.log(
+				`   Testing with ${currentBadContracts.length} accumulated bad contracts...`,
+			);
 			// Sort our bad contracts by negative DV (most negative first)
 			const sortedOurBadContracts = [...currentBadContracts].sort(
 				(a, b) => a.valueChange - b.valueChange,
@@ -788,6 +893,7 @@ async function acquireProspectsThroughChaining() {
 							);
 
 							if (tradeResult.possible) {
+								console.log(`   ✅ Found trade! Testing execution...`);
 								const success = await executeProspectTrade(
 									sortedProspects,
 									combination,
@@ -823,6 +929,7 @@ async function acquireProspectsThroughChaining() {
 
 		// If no trade with our bad contracts, try with just their bad contracts
 		if (!bestTrade) {
+			console.log(`   Testing with just their bad contracts...`);
 			// Try different combinations of their bad contracts, starting with the fewest needed
 			for (let j = 1; j <= Math.min(badContracts.length, 2); j++) {
 				const theirBadContractCombinations = getCombinations(badContracts, j);
@@ -845,6 +952,7 @@ async function acquireProspectsThroughChaining() {
 					);
 
 					if (tradeResult.possible) {
+						console.log(`   ✅ Found trade (no ours)! Testing execution...`);
 						const success = await executeProspectTrade(
 							sortedProspects,
 							[], // No bad contracts from us
@@ -869,8 +977,42 @@ async function acquireProspectsThroughChaining() {
 			}
 		}
 
+		// If no trade with all prospects or fewer, try each prospect individually with each bad contract
+		if (!bestTrade) {
+			for (const prospect of sortedProspects) {
+				for (const theirBadContract of badContracts) {
+					const testResult = await testProspectTrade(
+						[prospect],
+						[], // No our bad contracts
+						theirBadContract,
+					);
+					if (testResult.possible) {
+						console.log(
+							`   ✅ Found trade (single prospect)! Testing execution...`,
+						);
+						const success = await executeProspectTrade(
+							[prospect],
+							[],
+							theirBadContract,
+						);
+						if (success) {
+							bestTrade = {
+								prospects: [prospect],
+								badContracts: [],
+								theirBadContracts: [theirBadContract],
+								valueChange: testResult.valueChange,
+							};
+							break;
+						}
+					}
+				}
+				if (bestTrade) break;
+			}
+		}
+
 		// If still no trade, try removing worst prospects
 		if (!bestTrade) {
+			console.log(`   Trying with fewer prospects...`);
 			let testProspects = [...sortedProspects];
 
 			while (testProspects.length > 0) {
@@ -887,6 +1029,9 @@ async function acquireProspectsThroughChaining() {
 				);
 
 				if (tradeResult.possible) {
+					console.log(
+						`   ✅ Found trade with fewer prospects! Testing execution...`,
+					);
 					const success = await executeProspectTrade(
 						testProspects,
 						[], // No bad contracts from us
@@ -910,6 +1055,7 @@ async function acquireProspectsThroughChaining() {
 
 		// Add successful trade to results
 		if (bestTrade) {
+			console.log(`   🎉 Trade successful for team ${teamTid}!`);
 			successfulTrades.push(bestTrade);
 			currentBadContracts.push(...bestTrade.theirBadContracts);
 
@@ -923,6 +1069,8 @@ async function acquireProspectsThroughChaining() {
 					(p) => !tradedProspectPids.includes(p.pid),
 				);
 			}
+		} else {
+			console.log(`   ❌ No trade found for team ${teamTid}`);
 		}
 	}
 
@@ -937,8 +1085,6 @@ async function acquireProspectsThroughChaining() {
 
 // Main optimization function
 async function postDraftOptimize() {
-	console.log("🚀 Starting Post-Draft Optimization...");
-
 	// Check if you have any players first
 	const players = await getCurrentPlayers();
 
