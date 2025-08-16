@@ -228,6 +228,10 @@ export const getDefaultSettings = () => {
 			defaultGameAttributes,
 			"hideDisabledTeams",
 		),
+		hideProgressions: unwrapGameAttribute(
+			defaultGameAttributes,
+			"hideProgressions",
+		),
 		noStartingInjuries: false,
 		randomization: "none",
 		realStats: getDefaultRealStats(),

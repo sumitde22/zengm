@@ -86,6 +86,7 @@ export type Key =
 	| "randomization"
 	| "realStats"
 	| "hideDisabledTeams"
+	| "hideProgressions"
 	| "hofFactor"
 	| "injuries"
 	| "inflationAvg"

@@ -3,14 +3,16 @@ import clsx from "clsx";
 const RatingWithChange = ({
 	change,
 	children,
+	hideProgressions = false,
 }: {
 	change: number;
 	children: number;
+	hideProgressions?: boolean;
 }) => {
 	return (
 		<>
 			{children}
-			{change !== 0 ? (
+			{!hideProgressions && change !== 0 ? (
 				<span
 					className={clsx({
 						"text-success": change > 0,
@@ -26,11 +28,19 @@ const RatingWithChange = ({
 	);
 };
 
-export const wrappedRatingWithChange = (rating: number, change: number) => {
-	const formatted = `${rating} ${change !== 0 ? `(${change > 0 ? "+" : ""}{change})` : ""}`;
+export const wrappedRatingWithChange = (
+	rating: number,
+	change: number,
+	hideProgressions = false,
+) => {
+	const formatted = `${rating} ${!hideProgressions && change !== 0 ? `(${change > 0 ? "+" : ""}${change})` : ""}`;
 
 	return {
-		value: <RatingWithChange change={change}>{rating}</RatingWithChange>,
+		value: (
+			<RatingWithChange change={change} hideProgressions={hideProgressions}>
+				{rating}
+			</RatingWithChange>
+		),
 		sortValue: rating + (change + 500) / 1000,
 		searchValue: formatted,
 	};

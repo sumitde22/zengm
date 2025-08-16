@@ -128,6 +128,7 @@ const Roster = ({
 	const [sortedPids, setSortedPids] = useState<number[] | undefined>(undefined);
 	const [prevPlayers, setPrevPlayers] = useState(players);
 	const { gender } = useLocalPartial(["gender"]);
+	const { hideProgressions } = useLocalPartial(["hideProgressions"]);
 
 	useTitleBar({
 		title: "Roster",
@@ -304,10 +305,18 @@ const Roster = ({
 				p.ratings.pos,
 				p.age,
 				showRatings
-					? wrappedRatingWithChange(p.ratings.ovr, p.ratings.dovr)
+					? wrappedRatingWithChange(
+							p.ratings.ovr,
+							p.ratings.dovr,
+							hideProgressions,
+						)
 					: null,
 				showRatings
-					? wrappedRatingWithChange(p.ratings.pot, p.ratings.dpot)
+					? wrappedRatingWithChange(
+							p.ratings.pot,
+							p.ratings.dpot,
+							hideProgressions,
+						)
 					: null,
 				...(season === currentSeason ? [wrappedContract(p)] : []),
 				playoffs === "playoffs" ? null : p.stats.yearsWithTeam,

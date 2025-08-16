@@ -566,6 +566,7 @@ export type GameAttributesLeague = {
 	groupScheduleSeries: boolean;
 	heightFactor: number;
 	hideDisabledTeams: boolean;
+	hideProgressions: boolean;
 	hofFactor: number;
 	homeCourtAdvantage: number;
 	inflationAvg: number;
@@ -1053,6 +1054,7 @@ export type LocalStateUI = {
 	gold?: boolean;
 	godMode: boolean;
 	hideDisabledTeams: boolean;
+	hideProgressions: boolean;
 	homeCourtAdvantage: GameAttributesLeague["homeCourtAdvantage"];
 	leagueCreation?: {
 		id: number;

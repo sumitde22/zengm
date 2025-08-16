@@ -9,6 +9,7 @@ import {
 	RecordAndPlayoffs,
 } from "../components/index.tsx";
 import { arrow } from "./Trade/Summary.tsx";
+import { useLocalPartial } from "../util/index.ts";
 
 const PlayerList = ({
 	challengeNoRatings,
@@ -16,12 +17,14 @@ const PlayerList = ({
 	season,
 	showDraftPick,
 	userTid,
+	hideProgressions,
 }: {
 	challengeNoRatings: boolean;
 	players: any[];
 	season: number;
 	showDraftPick?: boolean;
 	userTid: number;
+	hideProgressions: boolean;
 }) => {
 	if (players.length === 0) {
 		return <p>None</p>;
@@ -83,11 +86,17 @@ const PlayerList = ({
 					<br />
 					{!challengeNoRatings ? (
 						<>
-							<RatingWithChange change={p.ratings.dovr}>
+							<RatingWithChange
+								change={p.ratings.dovr}
+								hideProgressions={hideProgressions}
+							>
 								{p.ratings.ovr}
 							</RatingWithChange>{" "}
 							ovr,{" "}
-							<RatingWithChange change={p.ratings.dpot}>
+							<RatingWithChange
+								change={p.ratings.dpot}
+								hideProgressions={hideProgressions}
+							>
 								{p.ratings.pot}
 							</RatingWithChange>{" "}
 							pot,{" "}
@@ -115,6 +124,7 @@ const TeamList = ({
 	teams,
 	season,
 	userTid,
+	hideProgressions,
 }: {
 	challengeNoRatings: boolean;
 	numPlayoffRounds: number;
@@ -122,6 +132,7 @@ const TeamList = ({
 	teams: View<"seasonPreview">["teamsTop"];
 	season: number;
 	userTid: number;
+	hideProgressions: boolean;
 }) => {
 	if (teams.length === 0) {
 		return <p>None</p>;
@@ -156,7 +167,13 @@ const TeamList = ({
 						</a>
 						{!challengeNoRatings ? (
 							<>
-								, <RatingWithChange change={t.dovr}>{t.ovr}</RatingWithChange>{" "}
+								,{" "}
+								<RatingWithChange
+									change={t.dovr}
+									hideProgressions={hideProgressions}
+								>
+									{t.ovr}
+								</RatingWithChange>{" "}
 								ovr
 							</>
 						) : null}
@@ -227,6 +244,7 @@ const SeasonPreview = ({
 			seasons: season,
 		},
 	});
+	const { hideProgressions } = useLocalPartial(["hideProgressions"]);
 	return (
 		<>
 			<MoreLinks type="league" page="season_preview" />
@@ -239,6 +257,7 @@ const SeasonPreview = ({
 							players={playersTop}
 							season={season}
 							userTid={userTid}
+							hideProgressions={hideProgressions}
 						/>
 					</div>
 					<div className="col-sm-6 col-md-4 col-lg-3">
@@ -248,6 +267,7 @@ const SeasonPreview = ({
 							players={playersImproving}
 							season={season}
 							userTid={userTid}
+							hideProgressions={hideProgressions}
 						/>
 					</div>
 					<div className="col-sm-6 col-md-4 col-lg-3">
@@ -257,6 +277,7 @@ const SeasonPreview = ({
 							players={playersDeclining}
 							season={season}
 							userTid={userTid}
+							hideProgressions={hideProgressions}
 						/>
 					</div>
 					<div className="col-sm-6 col-md-4 col-lg-3">
@@ -267,6 +288,7 @@ const SeasonPreview = ({
 							season={season}
 							userTid={userTid}
 							showDraftPick
+							hideProgressions={hideProgressions}
 						/>
 					</div>
 					<div className="col-sm-6 col-md-4 col-lg-3">
@@ -278,6 +300,7 @@ const SeasonPreview = ({
 							teams={teamsTop}
 							season={season}
 							userTid={userTid}
+							hideProgressions={hideProgressions}
 						/>
 					</div>
 					<div className="col-sm-6 col-md-4 col-lg-3">
@@ -289,6 +312,7 @@ const SeasonPreview = ({
 							teams={teamsImproving}
 							season={season}
 							userTid={userTid}
+							hideProgressions={hideProgressions}
 						/>
 					</div>
 					<div className="col-sm-6 col-md-4 col-lg-3">
@@ -300,6 +324,7 @@ const SeasonPreview = ({
 							teams={teamsDeclining}
 							season={season}
 							userTid={userTid}
+							hideProgressions={hideProgressions}
 						/>
 					</div>
 					<div className="col-sm-6 col-md-4 col-lg-3">
@@ -309,6 +334,7 @@ const SeasonPreview = ({
 							players={playersNewTeam}
 							season={season}
 							userTid={userTid}
+							hideProgressions={hideProgressions}
 						/>
 					</div>
 				</div>
