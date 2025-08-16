@@ -1,6 +1,7 @@
 import { bySport } from "../../../common/index.ts";
 import RatingWithChange from "../../components/RatingWithChange.tsx";
 import type { ReactNode } from "react";
+import { useLocalPartial } from "../../util/index.ts";
 
 const RatingsOverview = ({
 	ratings,
@@ -9,6 +10,8 @@ const RatingsOverview = ({
 	ratings: any[];
 	season?: number;
 }) => {
+	const { hideProgressions } = useLocalPartial(["hideProgressions"]);
+
 	let currentSeason: any;
 
 	if (season === undefined) {
@@ -475,13 +478,19 @@ const RatingsOverview = ({
 			<div className="d-flex justify-content-between">
 				<h2 className="me-3">
 					Overall:{" "}
-					<RatingWithChange change={currentSeason.ovr - lastSeason.ovr}>
+					<RatingWithChange
+						change={currentSeason.ovr - lastSeason.ovr}
+						hideProgressions={hideProgressions}
+					>
 						{currentSeason.ovr}
 					</RatingWithChange>
 				</h2>
 				<h2>
 					Potential:{" "}
-					<RatingWithChange change={currentSeason.pot - lastSeason.pot}>
+					<RatingWithChange
+						change={currentSeason.pot - lastSeason.pot}
+						hideProgressions={hideProgressions}
+					>
 						{currentSeason.pot}
 					</RatingWithChange>
 				</h2>
@@ -509,6 +518,7 @@ const RatingsOverview = ({
 															(currentSeason as any)[rating] -
 															(lastSeason as any)[rating]
 														}
+														hideProgressions={hideProgressions}
 													>
 														{(currentSeason as any)[rating]}
 													</RatingWithChange>

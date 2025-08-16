@@ -7,6 +7,7 @@ import GOATFormula from "./GOATFormula.tsx";
 import { wrappedPlayerNameLabels } from "../../components/PlayerNameLabels.tsx";
 import type { DataTableRow } from "../../components/DataTable/index.tsx";
 import { wrappedCurrency } from "../../components/wrappedCurrency.ts";
+import { useLocalPartial } from "../../util/index.ts";
 
 export const getValue = (
 	obj: any,
@@ -31,6 +32,8 @@ const Most = ({
 	userTid,
 }: View<"most">) => {
 	useTitleBar({ title, customMenu: frivolitiesMenu });
+
+	const { hideProgressions } = useLocalPartial(["hideProgressions"]);
 
 	const hasBestSeasonOverride = players.some(
 		(p) => p.most?.extra?.bestSeasonOverride !== undefined,
@@ -101,7 +104,7 @@ const Most = ({
 						return wrappedCurrency(value / 1000, "M");
 					}
 					if (x.colName === "Prog") {
-						return helpers.plusMinus(value, 0);
+						return hideProgressions ? value : helpers.plusMinus(value, 0);
 					}
 					if (x.colName === "GOAT") {
 						if (value < 1_000_000) {

@@ -96,6 +96,7 @@ type Key =
 	| "equalizeRegions"
 	| "realDraftRatings"
 	| "hideDisabledTeams"
+	| "hideProgressions"
 	| "hofFactor"
 	| "injuries"
 	| "inflationAvg"
@@ -305,6 +306,7 @@ const updateSettings = async (inputs: unknown, updateEvents: UpdateEvents) => {
 			pointsFormula: g.get("pointsFormula"),
 			equalizeRegions: g.get("equalizeRegions"),
 			hideDisabledTeams: g.get("hideDisabledTeams"),
+			hideProgressions: g.get("hideProgressions"),
 			noStartingInjuries: false,
 			hofFactor: g.get("hofFactor"),
 			injuries: g.get("injuries") ?? defaultInjuries,

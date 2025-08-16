@@ -2644,6 +2644,13 @@ export const settings: Setting[] = (
 		},
 		{
 			category: "UI",
+			key: "hideProgressions",
+			name: "Hide Progressions",
+			type: "bool",
+			description: "This will hide player progression information from the UI.",
+		},
+		{
+			category: "UI",
 			key: "numWatchColors",
 			name: "# Watch List Colors",
 			type: "int",
