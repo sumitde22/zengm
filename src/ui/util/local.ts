@@ -61,6 +61,7 @@ const useLocal = createWithEqualityFn<LocalStateWithActions>(
 		gold: undefined,
 		godMode: false,
 		hideDisabledTeams: false,
+		hideProgressions: false,
 		homeCourtAdvantage: 1,
 		lid: undefined,
 		liveGameInProgress: false,

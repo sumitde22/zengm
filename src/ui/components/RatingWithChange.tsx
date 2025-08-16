@@ -1,4 +1,5 @@
 import clsx from "clsx";
+import { useLocalPartial } from "../util/index.ts";
 
 const RatingWithChange = ({
 	change,
@@ -6,11 +7,13 @@ const RatingWithChange = ({
 }: {
 	change: number;
 	children: number;
+	hideProgressions?: boolean;
 }) => {
+	const hideProgressions = useLocalPartial(["hideProgressions"]);
 	return (
 		<>
 			{children}
-			{change !== 0 ? (
+			{!hideProgressions && change !== 0 ? (
 				<span
 					className={clsx({
 						"text-success": change > 0,
@@ -27,7 +30,8 @@ const RatingWithChange = ({
 };
 
 export const wrappedRatingWithChange = (rating: number, change: number) => {
-	const formatted = `${rating} ${change !== 0 ? `(${change > 0 ? "+" : ""}{change})` : ""}`;
+	const hideProgressions = useLocalPartial(["hideProgressions"]);
+	const formatted = `${rating} ${!hideProgressions && change !== 0 ? `(${change > 0 ? "+" : ""}${change})` : ""}`;
 
 	return {
 		value: <RatingWithChange change={change}>{rating}</RatingWithChange>,
