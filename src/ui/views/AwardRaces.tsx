@@ -1,5 +1,5 @@
 import useTitleBar from "../hooks/useTitleBar.tsx";
-import { helpers, getCols } from "../util/index.ts";
+import { helpers, getCols, useLocalPartial } from "../util/index.ts";
 import {
 	DataTable,
 	RatingWithChange,
@@ -18,6 +18,7 @@ const AwardRaces = ({
 	teams,
 	userTid,
 }: View<"awardRaces">) => {
+	const { hideProgressions } = useLocalPartial(["hideProgressions"]);
 	useTitleBar({
 		title: "Award Races",
 		jumpTo: true,
@@ -116,7 +117,12 @@ const AwardRaces = ({
 						if (mip) {
 							data.push(
 								pr && showRatings ? (
-									<RatingWithChange change={pr.dovr}>{pr.ovr}</RatingWithChange>
+									<RatingWithChange
+										change={pr.dovr}
+										hideProgressions={hideProgressions}
+									>
+										{pr.ovr}
+									</RatingWithChange>
 								) : undefined,
 							);
 

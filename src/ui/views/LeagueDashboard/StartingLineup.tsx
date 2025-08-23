@@ -3,7 +3,7 @@ import {
 	RatingWithChange,
 	ResponsiveTableWrapper,
 } from "../../components/index.tsx";
-import { getCols, helpers } from "../../util/index.ts";
+import { getCols, helpers, useLocalPartial } from "../../util/index.ts";
 import type { View } from "../../../common/types.ts";
 import { DEPTH_CHART_NAME, isSport } from "../../../common/index.ts";
 import { Contract } from "../../components/contract.tsx";
@@ -17,6 +17,8 @@ const StartingLineup = ({
 	View<"leagueDashboard">,
 	"challengeNoRatings" | "numPlayersOnCourt" | "starters" | "startersStats"
 >) => {
+	const { hideProgressions } = useLocalPartial(["hideProgressions"]);
+
 	const statCols = getCols(startersStats.map((stat) => `stat:${stat}`));
 
 	return (
@@ -65,14 +67,20 @@ const StartingLineup = ({
 								<td>{p.stats.yearsWithTeam}</td>
 								<td>
 									{!challengeNoRatings ? (
-										<RatingWithChange change={p.ratings.dovr}>
+										<RatingWithChange
+											change={p.ratings.dovr}
+											hideProgressions={hideProgressions}
+										>
 											{p.ratings.ovr}
 										</RatingWithChange>
 									) : null}
 								</td>
 								<td>
 									{!challengeNoRatings ? (
-										<RatingWithChange change={p.ratings.dpot}>
+										<RatingWithChange
+											change={p.ratings.dpot}
+											hideProgressions={hideProgressions}
+										>
 											{p.ratings.pot}
 										</RatingWithChange>
 									) : null}
