@@ -1,9 +1,9 @@
-const getValue = (player, strategy) => {
-	let playerValue = p.value;
-
-	// These factors don't make sense for negative value players!!!
+async function getPlayerValue(pid, strategy) {
+	const p = await bbgm.idb.cache.players.get(pid);
+	let playerValue =
+		(p.value - bbgm.local.playerOvrMean) / bbgm.local.playerOvrStd;
+	const contractValue = await getContractValue(p.contract, playerValue);
 	if (strategy === "rebuilding") {
-		// Value young/cheap players and draft picks more. Penalize expensive/old players
 		if (p.age <= 19) {
 			playerValue *= 1.075;
 		} else if (p.age === 20) {
@@ -36,15 +36,67 @@ const getValue = (player, strategy) => {
 			playerValue *= 0.95;
 		}
 	}
-
 	const contractsFactor = strategy === "rebuilding" ? 2 : 0.5;
-	playerValue += contractsFactor * p.contractValue;
-
+	playerValue += contractsFactor * contractValue;
 	return playerValue > 1 ? playerValue ** 7 : playerValue;
-};
+}
+
+async function getContractValue(contract, normalizedValue) {
+	const season = bbgm.g.get("season");
+	const phase = bbgm.g.get("phase");
+	if (contract.exp === season || (phase > 3 && contract.exp === season + 1)) {
+		return 0;
+	}
+
+	const salaryCap = bbgm.g.get("salaryCap");
+	const normalizedContractAmount = contract.amount / salaryCap;
+
+	const slope =
+		(bbgm.g.get("maxContract") / salaryCap -
+			bbgm.g.get("minContract") / salaryCap) /
+		2.5;
+
+	const expectedAmount = slope * (normalizedValue + 0.5);
+
+	const contractValue = expectedAmount - normalizedContractAmount;
+
+	return Math.min(contractValue, 0.1);
+}
 
 async function getExpansionDraftIntel() {
-	const players = await bbgm.idb.cache.players.getAll();
+	const { availablePids } = bbgm.g.get("expansionDraft");
+	const all = await bbgm.idb.cache.players.indexGetAll("playersByTid", [
+		0,
+		Infinity,
+	]);
+	const eligible_players = all.filter((p) => availablePids.includes(p.pid));
+	let rebuildingPlayerValues = [];
+	let contendingPlayerValues = [];
+	for (const p of eligible_players) {
+		rebuildingPlayerValues.push({
+			id: p.pid,
+			name: `${p.firstName} ${p.lastName}`,
+			tid: p.tid,
+			value: await getPlayerValue(p.pid, "rebuilding"),
+		});
+		contendingPlayerValues.push({
+			id: p.pid,
+			name: `${p.firstName} ${p.lastName}`,
+			tid: p.tid,
+			value: await getPlayerValue(p.pid, "contending"),
+		});
+	}
+	rebuildingPlayerValues.sort((p1, p2) => p2.value - p1.value);
+	contendingPlayerValues.sort((p1, p2) => p2.value - p1.value);
+	console.log("Player Value Leaderboard:");
+	for (let i = 0; i < 20; i++) {
+		console.log(
+			`${rebuildingPlayerValues[i].name}, ${rebuildingPlayerValues[i].value.toPrecision(4)} ||| ${contendingPlayerValues[i].name}, ${contendingPlayerValues[i].value.toPrecision(4)}`,
+		);
+		if (i == 9) {
+			console.log("----------------------------------------");
+		}
+	}
 }
 
 await getExpansionDraftIntel();
